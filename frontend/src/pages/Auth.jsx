@@ -51,7 +51,7 @@ export default function Auth({ setToken }) {
     <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
       <div className="glass-panel" style={{ width: '100%', maxWidth: '400px' }}>
         <div style={{ textAlign: 'center', marginBottom: '30px' }}>
-          <ShieldAlert size={48} className="text-cyan glow-text" style={{ margin: '0 auto 10px' }} />
+          <img src="/logo.png" alt="SBS Logo" style={{ height: '80px', margin: '0 auto 10px', display: 'block' }} />
           <h1 className="glow-text text-cyan">SBS SECURE</h1>
         </div>
 

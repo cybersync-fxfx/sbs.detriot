@@ -39,8 +39,11 @@ export default function Layout({ user, setToken }) {
     <div className="app-layout">
       {/* Top Bar */}
       <header style={{ height: '60px', borderBottom: '1px solid var(--panel-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 24px', background: 'var(--bg-dark)' }}>
-        <div className="glow-text text-cyan" style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: 'bold' }}>
-          SBS <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'var(--font-body)', fontWeight: 'normal', textShadow: 'none' }}>Server Based Security</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+          <img src="/logo.png" alt="SBS Logo" style={{ height: '32px' }} />
+          <div className="glow-text text-cyan" style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: 'bold' }}>
+            SBS <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'var(--font-body)', fontWeight: 'normal', textShadow: 'none' }}>Server Based Security</span>
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
           <div style={{ padding: '4px 12px', borderRadius: '20px', fontSize: '0.8rem', fontWeight: 'bold', border: `1px solid ${user?.agentStatus === 'CONNECTED' ? 'var(--success-green)' : 'var(--text-muted)'}`, color: user?.agentStatus === 'CONNECTED' ? 'var(--success-green)' : 'var(--text-muted)', boxShadow: user?.agentStatus === 'CONNECTED' ? '0 0 10px rgba(0,255,136,0.2)' : 'none' }}>
