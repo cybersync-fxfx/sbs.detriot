@@ -31,9 +31,6 @@ export default function Layout({ user, setToken }) {
     { path: '/settings', name: 'Settings', icon: <Settings size={18} /> },
   ];
 
-  if (user?.role === 'admin') {
-    navItems.splice(3, 0, { path: '/admin', name: 'User Approvals', icon: <Users size={18} /> });
-  }
 
   return (
     <div className="app-layout">
