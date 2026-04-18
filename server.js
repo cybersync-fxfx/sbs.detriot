@@ -371,11 +371,11 @@ table inet sbs_filter {
     tcp flags syn limit rate 1000/second burst 500 packets accept
     tcp flags syn drop
     
-    udp limit rate 10000/second accept
-    udp drop
+    meta l4proto udp limit rate 10000/second accept
+    meta l4proto udp drop
     
-    icmp type echo-request limit rate 10/second accept
-    icmp type echo-request drop
+    ip protocol icmp icmp type echo-request limit rate 10/second accept
+    ip protocol icmp icmp type echo-request drop
   }
 }
 EOF
