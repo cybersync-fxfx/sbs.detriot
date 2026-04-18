@@ -360,7 +360,7 @@ flush ruleset
 table inet sbs_filter {
   set blacklist {
     type ipv4_addr
-    flags dynamic, timeout
+    flags timeout
   }
 
   chain input {
@@ -368,14 +368,14 @@ table inet sbs_filter {
     
     ip saddr @blacklist drop
     
-    tcp flags syn limit rate 1000/second burst 500 packets accept
+    tcp flags syn limit rate 1000/second accept
     tcp flags syn drop
     
     meta l4proto udp limit rate 10000/second accept
     meta l4proto udp drop
     
-    icmp type echo-request limit rate 10/second accept
-    icmp type echo-request drop
+    ip protocol icmp limit rate 10/second accept
+    ip protocol icmp drop
   }
 }
 EOF

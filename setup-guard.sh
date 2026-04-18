@@ -31,7 +31,7 @@ flush ruleset
 table inet detroit_guard {
   set blacklist {
     type ipv4_addr
-    flags dynamic, timeout
+    flags timeout
     timeout 1h
   }
 
@@ -55,8 +55,8 @@ table inet detroit_guard {
     # Corrected UDP & ICMP syntax
     meta l4proto udp limit rate 10000/second accept
     meta l4proto udp drop
-    icmp type echo-request limit rate 10/second accept
-    icmp type echo-request drop
+    ip protocol icmp limit rate 10/second accept
+    ip protocol icmp drop
   }
 
   chain forward {
