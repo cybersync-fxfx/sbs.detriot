@@ -1,8 +1,36 @@
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
+
+// Auto-install dependencies if not present
+if (!fs.existsSync(path.join(__dirname, 'node_modules'))) {
+  console.log('\x1b[33m[!] Dependencies not found. Installing automatically...\x1b[0m');
+  try {
+    execSync('npm install', { stdio: 'inherit' });
+    console.log('\x1b[32m[✓] Dependencies installed successfully.\x1b[0m\n');
+  } catch (err) {
+    console.error('\x1b[31m[x] Failed to install dependencies. Please run npm install manually.\x1b[0m');
+    process.exit(1);
+  }
+}
+
+// Check for .env file
+if (!fs.existsSync(path.join(__dirname, '.env'))) {
+  console.log('\x1b[33m[!] .env file not found. Creating a template...\x1b[0m');
+  const envTemplate = `PORT=3000
+SUPABASE_URL=your_supabase_url
+SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_KEY=your_supabase_service_key
+`;
+  fs.writeFileSync(path.join(__dirname, '.env'), envTemplate);
+  console.log('\x1b[31m[x] .env template created. Please fill in your Supabase credentials in the .env file and restart the server.\x1b[0m');
+  process.exit(1);
+}
+
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
-const path = require('path');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 
@@ -16,7 +44,7 @@ const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY; // Needed for admin operations
 
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  console.error("Missing SUPABASE_URL or SUPABASE_ANON_KEY in .env");
+  console.error("\x1b[31m[x] Error: Missing SUPABASE_URL or SUPABASE_ANON_KEY in .env\x1b[0m");
   process.exit(1);
 }
 
@@ -486,4 +514,37 @@ app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'frontend', 'dist', 'index.html'));
 });
 
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, () => {
+  const asciiArt = `
+\x1b[36m ____       _             _ _     \x1b[35m____  ____  ____  \x1b[0m
+\x1b[36m|  _ \\  ___| |_ _ __ ___ (_) |_  \x1b[35m/ ___|| __ )/ ___| \x1b[0m
+\x1b[36m| | | |/ _ \\ __| '__/ _ \\| | __| \x1b[35m\\___ \\|  _ \\\\___ \\ \x1b[0m
+\x1b[36m| |_| |  __/ |_| | | (_) | | |_   \x1b[35m___) | |_) |___) |\x1b[0m
+\x1b[36m|____/ \\___|\\__|_|  \\___/|_|\\__| \x1b[35m|____/|____/|____/ \x1b[0m
+`;
+
+  console.clear();
+  console.log(asciiArt);
+  console.log('\x1b[1m\x1b[32m=== DETROIT SBS SERVER INITIATED ===\x1b[0m\n');
+  console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mServer HTTP:\x1b[0m   \x1b[36mhttp://localhost:${PORT}\x1b[0m`);
+  console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mWebSocket:\x1b[0m     \x1b[36mws://localhost:${PORT}\x1b[0m`);
+  
+  if (SUPABASE_URL) {
+    try {
+      const dbUrlHost = new URL(SUPABASE_URL).hostname;
+      console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mDatabase:\x1b[0m      \x1b[32mConnected\x1b[0m \x1b[90m(${dbUrlHost})\x1b[0m`);
+    } catch(e) {
+      console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mDatabase:\x1b[0m      \x1b[32mConnected\x1b[0m`);
+    }
+  } else {
+    console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mDatabase:\x1b[0m      \x1b[31mDisconnected\x1b[0m`);
+  }
+  
+  if (SUPABASE_SERVICE_KEY) {
+    console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mAdmin Status:\x1b[0m  \x1b[32mActive (Service Key present)\x1b[0m`);
+  } else {
+    console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mAdmin Status:\x1b[0m  \x1b[33mInactive (Running in Anon mode)\x1b[0m`);
+  }
+
+  console.log('\n\x1b[1m\x1b[33m[!] Waiting for connections...\x1b[0m\n');
+});
