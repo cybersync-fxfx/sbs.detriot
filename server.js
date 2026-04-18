@@ -13,6 +13,7 @@ const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 3000;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY; // Needed for admin operations
 
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   console.error("Missing SUPABASE_URL or SUPABASE_ANON_KEY in .env");
@@ -21,6 +22,8 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
 
 // Global Supabase Client (Anon privileges)
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Admin Client (Bypasses RLS, careful!)
+const supabaseAdmin = SUPABASE_SERVICE_KEY ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY) : supabase;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'frontend')));
@@ -45,6 +48,13 @@ const authMiddleware = async (req, res, next) => {
     const { data: profile } = await userClient.from('user_profiles').select('*').eq('id', user.id).single();
     if (!profile) throw new Error('Profile not found');
     
+    if (profile.status === 'pending') {
+      return res.status(403).json({ error: 'Account pending approval from administrator.', isPending: true });
+    }
+    if (profile.status === 'rejected') {
+      return res.status(403).json({ error: 'Account rejected.' });
+    }
+    
     req.user = { ...user, ...profile };
     next();
   } catch (err) {
@@ -53,8 +63,7 @@ const authMiddleware = async (req, res, next) => {
 };
 
 const adminMiddleware = (req, res, next) => {
-  // In a real app, you'd check roles via app_metadata
-  // if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
   next();
 };
 
@@ -109,12 +118,20 @@ app.post('/api/auth/login', async (req, res) => {
   });
   const { data: profile } = await userClient.from('user_profiles').select('*').eq('id', data.user.id).single();
   
+  if (profile?.status === 'pending') {
+    return res.status(403).json({ error: 'Account pending approval from administrator.' });
+  }
+  if (profile?.status === 'rejected') {
+    return res.status(403).json({ error: 'Account rejected.' });
+  }
+  
   res.json({ 
     token, 
     user: { 
       username: profile?.username || data.user.email, 
       apiKey: profile?.api_key, 
-      agentId: profile?.agent_id 
+      agentId: profile?.agent_id,
+      role: profile?.role
     } 
   });
 });
@@ -126,6 +143,7 @@ app.get('/api/me', authMiddleware, (req, res) => {
     email: req.user.email,
     apiKey: req.user.api_key,
     agentId: req.user.agent_id,
+    role: req.user.role,
     agentStatus
   });
 });
@@ -141,13 +159,43 @@ app.post('/api/me/regenerate-key', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
-  // Service role key needed to list all users, simplified for Anon key context:
-  res.status(501).json({ error: 'Requires Service Role Key for Admin routes' });
+  const { data, error } = await supabaseAdmin.from('user_profiles').select('*');
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+});
+
+app.post('/api/admin/approve', authMiddleware, adminMiddleware, async (req, res) => {
+  const { id } = req.body;
+  const { error } = await supabaseAdmin.from('user_profiles').update({ status: 'approved' }).eq('id', id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
+app.post('/api/admin/reject', authMiddleware, adminMiddleware, async (req, res) => {
+  const { id } = req.body;
+  const { error } = await supabaseAdmin.from('user_profiles').update({ status: 'rejected' }).eq('id', id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
 });
 
 // Agent Installer Download
 app.get('/api/agent/download', authMiddleware, (req, res) => {
+  const osType = req.query.os || 'ubuntu';
   const serverUrl = req.protocol + '://' + req.get('host');
+  
+  let osCheckScript = `OS_VERSION=$(grep -oP '(?<=^VERSION_ID=").*(?=")' /etc/os-release)
+if [[ "$osType" == "ubuntu" ]]; then
+  if [[ "$OS_VERSION" != "20.04" && "$OS_VERSION" != "22.04" && "$OS_VERSION" != "24.04" ]]; then
+    echo "Unsupported Ubuntu version."
+    exit 1
+  fi
+elif [[ "$osType" == "debian" ]]; then
+  if [[ "$OS_VERSION" != "11" && "$OS_VERSION" != "12" ]]; then
+    echo "Unsupported Debian version."
+    exit 1
+  fi
+fi`;
+
   const script = `#!/bin/bash
 # SBS Agent Installer
 if [ "$EUID" -ne 0 ]; then
@@ -155,11 +203,8 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-OS_VERSION=$(grep -oP '(?<=^VERSION_ID=").*(?=")' /etc/os-release)
-if [[ "$OS_VERSION" != "20.04" && "$OS_VERSION" != "22.04" && "$OS_VERSION" != "24.04" ]]; then
-  echo "Unsupported Ubuntu version. Only 20.04, 22.04, 24.04 are supported."
-  exit 1
-fi
+osType="${osType}"
+${osCheckScript}
 
 echo "Installing dependencies..."
 apt-get update

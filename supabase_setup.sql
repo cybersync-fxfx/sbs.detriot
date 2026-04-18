@@ -3,7 +3,9 @@ create table public.user_profiles (
   id uuid references auth.users not null primary key,
   username text unique not null,
   api_key text unique not null,
-  agent_id text unique not null
+  agent_id text unique not null,
+  role text not null default 'user',
+  status text not null default 'pending'
 );
 
 -- 2. Enable RLS
@@ -26,13 +28,18 @@ returns trigger
 language plpgsql
 security definer set search_path = ''
 as $$
+declare
+  is_first_user boolean;
 begin
-  insert into public.user_profiles (id, username, api_key, agent_id)
+  select not exists(select 1 from public.user_profiles) into is_first_user;
+  insert into public.user_profiles (id, username, api_key, agent_id, role, status)
   values (
     new.id,
     coalesce(new.raw_user_meta_data->>'username', 'user_' || substr(new.id::text, 1, 8)),
     'sbs_' || md5(random()::text || clock_timestamp()::text),
-    'agent_' || substring(md5(random()::text) from 1 for 12)
+    'agent_' || substring(md5(random()::text) from 1 for 12),
+    case when is_first_user then 'admin' else 'user' end,
+    case when is_first_user then 'approved' else 'pending' end
   );
   return new;
 end;

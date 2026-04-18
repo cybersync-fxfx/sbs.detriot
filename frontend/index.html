@@ -311,6 +311,10 @@
           <div class="nav-item" onclick="nav('firewall')">Firewall Rules</div>
           <div class="nav-item" onclick="nav('blocklist')">Block List</div>
         </div>
+        <div class="nav-section" id="nav-admin-section" style="display: none;">
+          <div class="nav-header">Admin</div>
+          <div class="nav-item" onclick="nav('admin'); loadPendingUsers()">User Approvals</div>
+        </div>
         <div class="nav-section">
           <div class="nav-header">Setup</div>
           <div class="nav-item" onclick="nav('install')">Install Agent</div>
@@ -424,9 +428,11 @@
             </div>
             
             <div style="margin-top: 20px;">
-              <span class="badge">Ubuntu 20.04</span>
-              <span class="badge">Ubuntu 22.04</span>
-              <span class="badge">Ubuntu 24.04</span>
+              <label for="os-select" style="display:block; margin-bottom:5px; color:var(--text-muted)">Target OS:</label>
+              <select id="os-select" style="background: rgba(2, 4, 8, 0.7); border: 1px solid var(--border-color); color: var(--text-main); padding: 8px 10px; font-family: var(--font-mono); border-radius: 4px; outline: none; width: auto;">
+                <option value="ubuntu">Ubuntu (20.04, 22.04, 24.04)</option>
+                <option value="debian">Debian (11, 12)</option>
+              </select>
             </div>
           </div>
         </div>
@@ -529,6 +535,26 @@
                 <tr>
                   <td colspan="4" style="text-align:center; color:var(--text-muted)">No banned IPs or click Sync.</td>
                 </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Admin -->
+        <div id="page-admin" class="page">
+          <h2 class="page-title">Admin Panel - Pending Approvals</h2>
+          <div class="panel">
+            <table id="admin-users-table">
+              <thead>
+                <tr>
+                  <th>USERNAME</th>
+                  <th>USER ID (UUID)</th>
+                  <th>AGENT ID</th>
+                  <th>ACTION</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="4" style="text-align:center; color:var(--text-muted)">Loading...</td></tr>
               </tbody>
             </table>
           </div>
@@ -639,11 +665,15 @@
           localStorage.setItem('sbs_token', authToken);
           window.location.reload();
         } else {
-          alert('Registration successful! Please sign in.');
+          alert('Registration successful! Please wait for an administrator to approve your account before signing in.');
           switchAuthTab('login');
         }
       } else {
-        alert('Error: ' + data.error);
+        if (data.isPending) {
+          alert('Your account is still pending approval by an administrator.');
+        } else {
+          alert('Error: ' + data.error);
+        }
       }
     }
 
@@ -666,6 +696,10 @@
       document.getElementById('lbl-agent-id').innerText = currentUser.agentId;
       document.getElementById('lbl-agent-id-2').innerText = currentUser.agentId;
       
+      if (currentUser.role === 'admin') {
+        document.getElementById('nav-admin-section').style.display = 'block';
+      }
+      
       updateAgentStatus(currentUser.agentStatus === 'CONNECTED');
     }
 
@@ -678,8 +712,8 @@
 
     // Agent Actions
     function downloadAgent() {
-      window.location.href = '/api/agent/download?token=' + authToken; // token param maybe needed if download isn't purely header auth, let's just use fetch and blob
-      fetch('/api/agent/download', {
+      const osType = document.getElementById('os-select').value;
+      fetch(`/api/agent/download?os=${osType}`, {
         headers: { 'Authorization': 'Bearer ' + authToken }
       }).then(r => r.blob()).then(blob => {
         const url = window.URL.createObjectURL(blob);
@@ -760,6 +794,43 @@
         pill.innerText = 'NO AGENT';
         if(banner) banner.style.display = 'flex';
       }
+    }
+
+    // Admin Actions
+    async function loadPendingUsers() {
+      const res = await fetch('/api/admin/users', { headers: { 'Authorization': 'Bearer ' + authToken } });
+      if(!res.ok) return;
+      const users = await res.json();
+      const tbody = document.querySelector('#admin-users-table tbody');
+      tbody.innerHTML = '';
+      const pending = users.filter(u => u.status === 'pending');
+      if (pending.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted)">No pending requests.</td></tr>';
+        return;
+      }
+      pending.forEach(u => {
+        tbody.innerHTML += `<tr>
+          <td class="mono">${u.username}</td>
+          <td>${u.id.substring(0, 8)}...</td>
+          <td class="mono">${u.agent_id}</td>
+          <td>
+            <button onclick="approveUser('${u.id}')">Approve</button>
+            <button class="danger" onclick="rejectUser('${u.id}')">Reject</button>
+          </td>
+        </tr>`;
+      });
+    }
+
+    async function approveUser(id) {
+      if(!confirm('Approve this user?')) return;
+      await fetch('/api/admin/approve', { method: 'POST', headers: { 'Authorization': 'Bearer ' + authToken, 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+      loadPendingUsers();
+    }
+
+    async function rejectUser(id) {
+      if(!confirm('Reject this user?')) return;
+      await fetch('/api/admin/reject', { method: 'POST', headers: { 'Authorization': 'Bearer ' + authToken, 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+      loadPendingUsers();
     }
 
     // WebSocket
