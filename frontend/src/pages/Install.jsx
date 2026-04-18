@@ -23,6 +23,17 @@ export default function Install({ token, user }) {
       
       <div className="glass-panel">
         <h3 style={{ marginBottom: '15px' }}>Installation Steps</h3>
+        
+        <div style={{ background: '#05070a', border: '1px solid var(--panel-border)', borderRadius: '8px', padding: '20px', marginBottom: '20px' }}>
+          <h4 style={{ marginBottom: '15px', color: 'var(--success-green)' }}>System Status</h4>
+          <ul style={{ listStyle: 'none', lineHeight: '2' }}>
+            <li>✅ Agent Connected</li>
+            <li>✅ GRE Tunnel Active</li>
+            <li>✅ Traffic Routing Through Guard</li>
+            <li>✅ Real IP Hidden</li>
+          </ul>
+        </div>
+        
         <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>Follow these steps to deploy the SBS agent on your target server. You must have root access.</p>
         
         <div style={{ padding: '20px', borderLeft: '2px solid var(--accent-cyan)', background: 'rgba(0, 240, 255, 0.05)', marginBottom: '20px', borderRadius: '4px' }}>

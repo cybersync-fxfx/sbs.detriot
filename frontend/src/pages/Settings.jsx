@@ -1,4 +1,20 @@
+import { useState } from 'react';
+
 export default function Settings({ user }) {
+  const handleRemoveTunnel = async () => {
+    if (confirm("WARNING: your server will be exposed directly to the internet. Continue?")) {
+      try {
+        await fetch('/api/agent/tunnel/remove', {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('sbs_token')}` }
+        });
+        alert("Protection disconnected successfully.");
+      } catch (err) {
+        alert("Failed to disconnect protection.");
+      }
+    }
+  };
+
   return (
     <div>
       <h2 style={{ marginBottom: '20px', color: 'var(--accent-cyan)' }}>Platform Settings</h2>
@@ -17,6 +33,14 @@ export default function Settings({ user }) {
           <input type="password" placeholder="Leave blank to keep current" style={{ flex: 2 }} />
         </div>
         <button style={{ marginTop: '10px' }}>Update Profile</button>
+        
+        <h3 style={{ marginBottom: '20px', marginTop: '40px' }}>Network Protection</h3>
+        <p style={{ color: 'var(--text-muted)', marginBottom: '15px' }}>
+          By disconnecting, you will remove the GRE tunnel. All traffic will route directly to your server, exposing your real IP.
+        </p>
+        <button onClick={handleRemoveTunnel} style={{ background: 'var(--danger-red)', color: '#fff', border: '1px solid #ff4444' }}>
+          Disconnect Protection
+        </button>
       </div>
     </div>
   );

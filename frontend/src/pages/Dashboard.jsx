@@ -28,6 +28,8 @@ export default function Dashboard({ user }) {
     os: '-',
   });
 
+  const [tunnelStatus, setTunnelStatus] = useState('inactive');
+
   const [logs, setLogs] = useState([]);
   
   const [chartData, setChartData] = useState({
@@ -42,6 +44,13 @@ export default function Dashboard({ user }) {
     const token = localStorage.getItem('sbs_token');
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
+    
+    fetch('/api/agent/tunnel/status', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    .then(r => r.json())
+    .then(data => setTunnelStatus(data.status))
+    .catch(() => {});
     
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
@@ -142,7 +151,15 @@ export default function Dashboard({ user }) {
         <div className="glass-panel">
           <h3 style={{ marginBottom: '15px', color: 'var(--accent-cyan)' }}>Agent Info</h3>
           <ul style={{ listStyle: 'none' }}>
-            {[{ label: 'Hostname', value: stats.hostname }, { label: 'IP Address', value: stats.ip }, { label: 'OS', value: stats.os || 'Ubuntu' }, { label: 'Uptime', value: upStr }, { label: 'SYN Rate/s', value: stats.synRate }, { label: 'Total Packets/s', value: stats.pps }].map((item, idx) => (
+            {[
+              { label: 'Hostname', value: stats.hostname }, 
+              { label: 'IP Address', value: stats.ip }, 
+              { label: 'OS', value: stats.os || 'Ubuntu' }, 
+              { label: 'Uptime', value: upStr }, 
+              { label: 'GRE Tunnel', value: tunnelStatus === 'active' ? <span style={{color: 'var(--success-green)'}}>ACTIVE</span> : <span style={{color: 'var(--danger-red)'}}>INACTIVE</span> },
+              { label: 'Guard IP', value: window.location.hostname },
+              { label: 'Protected', value: tunnelStatus === 'active' ? 'YES' : 'NO' }
+            ].map((item, idx) => (
               <li key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                 <span>{item.label}</span>
                 <span className="font-mono text-cyan">{item.value}</span>

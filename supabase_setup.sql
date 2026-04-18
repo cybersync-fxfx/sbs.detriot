@@ -5,7 +5,10 @@ create table public.user_profiles (
   api_key text unique not null,
   agent_id text unique not null,
   role text not null default 'user',
-  status text not null default 'pending'
+  status text not null default 'pending',
+  tunnel_status text default 'inactive',
+  client_ip text,
+  tunnel_created_at timestamptz
 );
 
 -- 2. Enable RLS

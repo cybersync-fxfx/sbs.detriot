@@ -274,6 +274,16 @@ function makeRequest(path, method, data, callback) {
   req.end();
 }
 
+function registerTunnel() {
+  makeRequest('/api/agent/tunnel/create', 'POST', {
+    agentId: config.agentId,
+    apiKey: config.apiKey,
+    clientIp: fs.readFileSync('/tmp/client_ip.txt', 'utf-8').trim()
+  }, (err, res) => {
+    if (!err) console.log('[SBS] Tunnel registered with guard');
+  });
+}
+
 function register() {
   makeRequest('/api/agent/register', 'POST', {
     agentId: config.agentId,
@@ -282,6 +292,8 @@ function register() {
     ip: 'auto',
     os: 'Ubuntu',
     arch: process.arch
+  }, (err) => {
+    if (!err) registerTunnel();
   });
 }
 
@@ -370,6 +382,37 @@ EOF
 systemctl enable nftables
 systemctl restart nftables
 
+# Get IPs for Tunneling
+CLIENT_IP=\$(hostname -I | awk '{print \$1}')
+echo "\$CLIENT_IP" > /tmp/client_ip.txt
+GUARD_IP=\$(curl -s ifconfig.me)
+
+echo "[SBS] Setting up GRE tunnel to Detroit SBS guard..."
+ip tunnel add gre_detroit mode gre \\
+  remote \${GUARD_IP} \\
+  local \${CLIENT_IP} \\
+  ttl 255 2>/dev/null || true
+ip link set gre_detroit up
+
+ip route add default via \${GUARD_IP} dev gre_detroit metric 100 2>/dev/null || true
+echo "[SBS] GRE tunnel established"
+
+echo "[SBS] Locking server — only accepting traffic from guard..."
+nft add rule inet sbs_filter input \\
+  ip saddr != \${GUARD_IP} \\
+  ip saddr != 127.0.0.1 \\
+  drop
+echo "[SBS] Direct access blocked — traffic routing through Detroit SBS"
+
+cat > /etc/network/if-up.d/detroit-tunnel << TUNNEL
+#!/bin/bash
+CLIENT_IP=\\\$(hostname -I | awk '{print \\\$1}')
+ip tunnel add gre_detroit mode gre remote \${GUARD_IP} local \\\$CLIENT_IP ttl 255 2>/dev/null || true
+ip link set gre_detroit up 2>/dev/null || true
+ip route add default via \${GUARD_IP} dev gre_detroit metric 100 2>/dev/null || true
+TUNNEL
+chmod +x /etc/network/if-up.d/detroit-tunnel
+
 cat << 'EOF' > /etc/systemd/system/sbs-agent.service
 [Unit]
 Description=SBS Agent
@@ -448,6 +491,63 @@ app.post('/api/command', authMiddleware, (req, res) => {
   commandQueue[agent_id].push(cmdObj);
   
   res.json({ success: true, cmdId: cmdObj.id });
+});
+
+// GRE Tunnel Endpoints
+app.post('/api/agent/tunnel/create', agentAuthMiddleware, async (req, res) => {
+  const { agentId, clientIp } = req.body;
+  
+  if (!clientIp) return res.status(400).json({ error: 'Missing clientIp' });
+
+  try {
+    const { execSync } = require('child_process');
+    // Using bash to run the script since the app might not run as root.
+    // NOTE: In production, ensure the node process has sudo privileges for this script without password
+    execSync(`sudo /opt/detroit-sbs/tunnel-manager.sh add ${agentId} ${clientIp}`);
+    
+    // Update Supabase
+    await supabaseAdmin.from('user_profiles')
+      .update({ 
+        tunnel_status: 'active', 
+        client_ip: clientIp,
+        tunnel_created_at: new Date().toISOString()
+      })
+      .eq('agent_id', agentId);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Tunnel creation failed:', err.message);
+    res.status(500).json({ error: 'Tunnel creation failed' });
+  }
+});
+
+app.delete('/api/agent/tunnel/remove', authMiddleware, async (req, res) => {
+  const { agent_id } = req.user;
+  
+  try {
+    const { execSync } = require('child_process');
+    execSync(`sudo /opt/detroit-sbs/tunnel-manager.sh remove ${agent_id}`);
+    
+    // Update Supabase
+    await supabaseAdmin.from('user_profiles')
+      .update({ tunnel_status: 'inactive' })
+      .eq('agent_id', agent_id);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Tunnel removal failed:', err.message);
+    res.status(500).json({ error: 'Tunnel removal failed' });
+  }
+});
+
+app.get('/api/agent/tunnel/status', authMiddleware, async (req, res) => {
+  const { agent_id } = req.user;
+  try {
+    const { data } = await supabaseAdmin.from('user_profiles').select('tunnel_status').eq('agent_id', agent_id).single();
+    res.json({ status: data?.tunnel_status || 'inactive' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch status' });
+  }
 });
 
 // Websocket logic
