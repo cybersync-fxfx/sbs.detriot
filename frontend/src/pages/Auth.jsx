@@ -78,7 +78,7 @@ export default function Auth({ setToken }) {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '15px' }}>
-              <div style={{ background: 'rgba(0, 240, 255, 0.1)', padding: '12px', borderRadius: '12px', color: 'var(--accent-cyan)' }}>
+              <div style={{ background: 'rgba(0, 51, 255, 0.1)', padding: '12px', borderRadius: '12px', color: 'var(--accent-cyan)' }}>
                 <Activity size={24} />
               </div>
               <div>

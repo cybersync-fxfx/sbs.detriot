@@ -68,7 +68,7 @@ export default function Layout({ user, setToken }) {
                 to={item.path} 
                 style={{ 
                   display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 24px', textDecoration: 'none', color: isActive ? 'var(--accent-cyan)' : 'var(--text-main)', 
-                  background: isActive ? 'rgba(0, 240, 255, 0.1)' : 'transparent',
+                  background: isActive ? 'rgba(0, 51, 255, 0.1)' : 'transparent',
                   borderLeft: `3px solid ${isActive ? 'var(--accent-cyan)' : 'transparent'}`,
                   transition: 'all 0.2s'
                 }}

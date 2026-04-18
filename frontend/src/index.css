@@ -3,12 +3,12 @@
 :root {
   --bg-dark: #000000;
   --panel-bg: rgba(5, 5, 10, 0.85);
-  --panel-border: rgba(0, 229, 255, 0.15);
-  --accent-cyan: #00e5ff;
-  --accent-glow: rgba(0, 229, 255, 0.5);
+  --panel-border: rgba(0, 51, 255, 0.15);
+  --accent-cyan: #0033ff;
+  --accent-glow: rgba(0, 51, 255, 0.5);
   --danger-red: #ff003c;
   --danger-glow: rgba(255, 0, 60, 0.5);
-  --success-green: #00e5ff; /* Changing green to electric blue per user request */
+  --success-green: #0033ff; /* Changing green to electric blue per user request */
   --warn-amber: #ff003c; /* Changing amber to red per user request */
   --text-main: #f1f5f9;
   --text-muted: #8b9bb4;
@@ -33,7 +33,7 @@ body::before {
   content: "";
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: radial-gradient(circle at 50% 0%, rgba(0, 229, 255, 0.06), transparent 50%),
+  background: radial-gradient(circle at 50% 0%, rgba(0, 51, 255, 0.06), transparent 50%),
               radial-gradient(circle at 50% 100%, rgba(255, 0, 60, 0.04), transparent 50%);
   z-index: -1;
   pointer-events: none;
@@ -59,11 +59,11 @@ input, select {
 
 input:focus, select:focus { 
   border-color: var(--accent-cyan); 
-  box-shadow: 0 0 15px rgba(0, 229, 255, 0.2); 
+  box-shadow: 0 0 15px rgba(0, 51, 255, 0.2); 
 }
 
 button {
-  background: rgba(0, 229, 255, 0.08);
+  background: rgba(0, 51, 255, 0.08);
   border: 1px solid var(--accent-cyan);
   color: var(--accent-cyan);
   padding: 12px 24px;

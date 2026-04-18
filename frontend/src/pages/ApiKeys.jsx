@@ -1,5 +1,18 @@
 import { useState } from 'react';
 
+const CopyIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+  </svg>
+);
+
+const CheckIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="20 6 9 17 4 12"></polyline>
+  </svg>
+);
+
 export default function ApiKeys({ token, user, setUser }) {
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
@@ -38,18 +51,22 @@ export default function ApiKeys({ token, user, setUser }) {
           <input type="text" value={user?.agentId || ''} readOnly style={{ flex: 2 }} />
           <button 
             onClick={() => handleCopy(user?.agentId, 'id')}
+            title="Copy Agent ID"
             style={{
-              padding: '8px 15px',
+              padding: '8px 12px',
               background: copiedId ? 'var(--accent-cyan)' : 'transparent',
               color: copiedId ? '#000' : 'var(--accent-cyan)',
               border: `1px solid var(--accent-cyan)`,
-              boxShadow: copiedId ? '0 0 15px var(--accent-cyan)' : '0 0 5px rgba(0, 229, 255, 0.2)',
+              boxShadow: copiedId ? '0 0 15px var(--accent-cyan)' : '0 0 5px rgba(0, 51, 255, 0.2)',
               cursor: 'pointer',
-              minWidth: '90px',
-              transition: 'all 0.2s'
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.2s',
+              borderRadius: '4px'
             }}
           >
-            {copiedId ? 'Copied!' : 'Copy ID'}
+            {copiedId ? <CheckIcon /> : <CopyIcon />}
           </button>
         </div>
         <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', alignItems: 'center' }}>
@@ -57,18 +74,22 @@ export default function ApiKeys({ token, user, setUser }) {
           <input type="text" value={user?.apiKey || ''} readOnly style={{ flex: 2 }} />
           <button 
             onClick={() => handleCopy(user?.apiKey, 'key')}
+            title="Copy API Key"
             style={{
-              padding: '8px 15px',
+              padding: '8px 12px',
               background: copiedKey ? 'var(--accent-cyan)' : 'transparent',
               color: copiedKey ? '#000' : 'var(--accent-cyan)',
               border: `1px solid var(--accent-cyan)`,
-              boxShadow: copiedKey ? '0 0 15px var(--accent-cyan)' : '0 0 5px rgba(0, 229, 255, 0.2)',
+              boxShadow: copiedKey ? '0 0 15px var(--accent-cyan)' : '0 0 5px rgba(0, 51, 255, 0.2)',
               cursor: 'pointer',
-              minWidth: '90px',
-              transition: 'all 0.2s'
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.2s',
+              borderRadius: '4px'
             }}
           >
-            {copiedKey ? 'Copied!' : 'Copy Key'}
+            {copiedKey ? <CheckIcon /> : <CopyIcon />}
           </button>
         </div>
         <div style={{ marginTop: '30px', display: 'flex', alignItems: 'center', gap: '15px' }}>

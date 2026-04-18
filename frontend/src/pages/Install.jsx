@@ -36,7 +36,7 @@ export default function Install({ token, user }) {
         
         <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>Follow these steps to deploy the SBS agent on your target server. You must have root access.</p>
         
-        <div style={{ padding: '20px', borderLeft: '2px solid var(--accent-cyan)', background: 'rgba(0, 240, 255, 0.05)', marginBottom: '20px', borderRadius: '4px' }}>
+        <div style={{ padding: '20px', borderLeft: '2px solid var(--accent-cyan)', background: 'rgba(0, 51, 255, 0.05)', marginBottom: '20px', borderRadius: '4px' }}>
           <strong style={{ display: 'block', marginBottom: '15px' }}>Step 1: Select OS and Download Installer</strong>
           <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
             <select value={osType} onChange={e => setOsType(e.target.value)} style={{ width: 'auto' }}>
@@ -47,14 +47,14 @@ export default function Install({ token, user }) {
           </div>
         </div>
 
-        <div style={{ padding: '20px', borderLeft: '2px solid var(--accent-cyan)', background: 'rgba(0, 240, 255, 0.05)', marginBottom: '20px', borderRadius: '4px' }}>
+        <div style={{ padding: '20px', borderLeft: '2px solid var(--accent-cyan)', background: 'rgba(0, 51, 255, 0.05)', marginBottom: '20px', borderRadius: '4px' }}>
           <strong style={{ display: 'block', marginBottom: '15px' }}>Step 2: Upload to your server</strong>
           <div style={{ background: '#05070a', padding: '15px', borderRadius: '4px', border: '1px solid var(--panel-border)', fontFamily: 'var(--font-mono)', color: 'var(--accent-cyan)' }}>
             scp sbs-agent-{user?.agentId}.sh root@YOUR_SERVER_IP:/root/
           </div>
         </div>
 
-        <div style={{ padding: '20px', borderLeft: '2px solid var(--accent-cyan)', background: 'rgba(0, 240, 255, 0.05)', borderRadius: '4px' }}>
+        <div style={{ padding: '20px', borderLeft: '2px solid var(--accent-cyan)', background: 'rgba(0, 51, 255, 0.05)', borderRadius: '4px' }}>
           <strong style={{ display: 'block', marginBottom: '15px' }}>Step 3: Run the installer</strong>
           <div style={{ background: '#05070a', padding: '15px', borderRadius: '4px', border: '1px solid var(--panel-border)', fontFamily: 'var(--font-mono)', color: 'var(--accent-cyan)' }}>
             sudo bash /root/sbs-agent-{user?.agentId}.sh

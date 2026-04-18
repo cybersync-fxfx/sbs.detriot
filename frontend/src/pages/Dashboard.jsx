@@ -35,7 +35,7 @@ export default function Dashboard({ user }) {
   const [chartData, setChartData] = useState({
     labels: Array(40).fill(''),
     datasets: [
-      { label: 'Inbound (Mbps)', borderColor: '#00e5ff', backgroundColor: 'rgba(0, 229, 255, 0.1)', borderWidth: 2, tension: 0.4, fill: true, data: Array(40).fill(0), pointRadius: 0 },
+      { label: 'Inbound (Mbps)', borderColor: '#0033ff', backgroundColor: 'rgba(0, 51, 255, 0.1)', borderWidth: 2, tension: 0.4, fill: true, data: Array(40).fill(0), pointRadius: 0 },
       { label: 'Outbound (Mbps)', borderColor: '#ff003c', backgroundColor: 'rgba(255, 0, 60, 0.1)', borderWidth: 2, tension: 0.4, fill: true, data: Array(40).fill(0), pointRadius: 0 }
     ]
   });
