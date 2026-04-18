@@ -1,0 +1,30 @@
+{
+  "name": "sbs.detriot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cybersync-fxfx/sbs.detriot.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/cybersync-fxfx/sbs.detriot/issues"
+  },
+  "homepage": "https://github.com/cybersync-fxfx/sbs.detriot#readme",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.103.3",
+    "bcrypt": "^6.0.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "ws": "^8.20.0"
+  }
+}
