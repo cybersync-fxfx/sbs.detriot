@@ -17,7 +17,7 @@ if (!fs.existsSync(path.join(__dirname, 'node_modules'))) {
 // Check for .env file
 if (!fs.existsSync(path.join(__dirname, '.env'))) {
   console.log('\x1b[33m[!] .env file not found. Creating a template...\x1b[0m');
-  const envTemplate = `PORT=3000
+  const envTemplate = `PORT=3001
 SUPABASE_URL=your_supabase_url
 SUPABASE_ANON_KEY=your_supabase_anon_key
 SUPABASE_SERVICE_KEY=your_supabase_service_key
@@ -38,7 +38,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY; // Needed for admin operations
