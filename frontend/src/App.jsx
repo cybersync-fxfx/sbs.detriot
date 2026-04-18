@@ -46,7 +46,7 @@ function App() {
         ) : (
           <Route element={<Layout user={user} setToken={setToken} />}>
             <Route path="/" element={<Dashboard user={user} />} />
-            <Route path="/terminal" element={<Terminal token={token} />} />
+            <Route path="/terminal" element={<Terminal token={token} user={user} />} />
             <Route path="/firewall" element={<Firewall token={token} />} />
             <Route path="/blocklist" element={<Blocklist token={token} />} />
             <Route path="/install" element={<Install token={token} user={user} />} />

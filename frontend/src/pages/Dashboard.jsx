@@ -61,8 +61,8 @@ export default function Dashboard({ user }) {
         }));
 
         setChartData(prev => {
-          const newIn = [...prev.datasets[0].data.slice(1), s.inMbps || Math.random() * 10];
-          const newOut = [...prev.datasets[1].data.slice(1), s.outMbps || Math.random() * 5];
+          const newIn = [...prev.datasets[0].data.slice(1), s.inMbps || 0];
+          const newOut = [...prev.datasets[1].data.slice(1), s.outMbps || 0];
           return {
             ...prev,
             datasets: [
