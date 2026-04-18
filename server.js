@@ -26,7 +26,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const supabaseAdmin = SUPABASE_SERVICE_KEY ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY) : supabase;
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'frontend')));
+app.use(express.static(path.join(__dirname, 'frontend', 'dist')));
 
 let db = { agents: {} }; // agents store runtime state
 let commandQueue = {}; // { agentId: [{ id, cmd }] }
@@ -483,7 +483,7 @@ setInterval(() => {
 
 // Catch all for SPA
 app.use((req, res) => {
-  res.sendFile(path.join(__dirname, 'frontend', 'index.html'));
+  res.sendFile(path.join(__dirname, 'frontend', 'dist', 'index.html'));
 });
 
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
