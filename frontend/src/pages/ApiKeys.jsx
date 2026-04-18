@@ -1,4 +1,19 @@
+import { useState } from 'react';
+
 export default function ApiKeys({ token, user, setUser }) {
+  const [copiedKey, setCopiedKey] = useState(false);
+  const [copiedId, setCopiedId] = useState(false);
+
+  const handleCopy = (text, type) => {
+    navigator.clipboard.writeText(text);
+    if (type === 'key') {
+      setCopiedKey(true);
+      setTimeout(() => setCopiedKey(false), 2000);
+    } else {
+      setCopiedId(true);
+      setTimeout(() => setCopiedId(false), 2000);
+    }
+  };
   const regenerateKey = async () => {
     if (!confirm('Regenerating API Key will disconnect your current agent. Proceed?')) return;
     try {
@@ -16,18 +31,48 @@ export default function ApiKeys({ token, user, setUser }) {
   return (
     <div>
       <h2 style={{ marginBottom: '20px', color: 'var(--accent-cyan)' }}>API & Credentials</h2>
-      <div className="glass-panel" style={{ marginBottom: '20px' }}>
+      <div className="glass-panel" style={{ marginBottom: '20px', borderTop: '2px solid var(--danger-red)' }}>
         <h3 style={{ marginBottom: '20px' }}>Your Credentials</h3>
-        <div style={{ display: 'flex', gap: '20px', marginBottom: '20px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', alignItems: 'center' }}>
           <label style={{ flex: 1, color: 'var(--text-muted)' }}>Agent ID (Public identifier)</label>
           <input type="text" value={user?.agentId || ''} readOnly style={{ flex: 2 }} />
+          <button 
+            onClick={() => handleCopy(user?.agentId, 'id')}
+            style={{
+              padding: '8px 15px',
+              background: copiedId ? 'var(--accent-cyan)' : 'transparent',
+              color: copiedId ? '#000' : 'var(--accent-cyan)',
+              border: `1px solid var(--accent-cyan)`,
+              boxShadow: copiedId ? '0 0 15px var(--accent-cyan)' : '0 0 5px rgba(0, 229, 255, 0.2)',
+              cursor: 'pointer',
+              minWidth: '90px',
+              transition: 'all 0.2s'
+            }}
+          >
+            {copiedId ? 'Copied!' : 'Copy ID'}
+          </button>
         </div>
-        <div style={{ display: 'flex', gap: '20px', marginBottom: '20px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', alignItems: 'center' }}>
           <label style={{ flex: 1, color: 'var(--text-muted)' }}>API Key (Secret token)</label>
           <input type="text" value={user?.apiKey || ''} readOnly style={{ flex: 2 }} />
+          <button 
+            onClick={() => handleCopy(user?.apiKey, 'key')}
+            style={{
+              padding: '8px 15px',
+              background: copiedKey ? 'var(--accent-cyan)' : 'transparent',
+              color: copiedKey ? '#000' : 'var(--accent-cyan)',
+              border: `1px solid var(--accent-cyan)`,
+              boxShadow: copiedKey ? '0 0 15px var(--accent-cyan)' : '0 0 5px rgba(0, 229, 255, 0.2)',
+              cursor: 'pointer',
+              minWidth: '90px',
+              transition: 'all 0.2s'
+            }}
+          >
+            {copiedKey ? 'Copied!' : 'Copy Key'}
+          </button>
         </div>
-        <div style={{ marginTop: '20px', display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <button className="danger" onClick={regenerateKey}>Regenerate API Key</button>
+        <div style={{ marginTop: '30px', display: 'flex', alignItems: 'center', gap: '15px' }}>
+          <button className="danger" onClick={regenerateKey} style={{ background: 'transparent', color: 'var(--danger-red)', border: '1px solid var(--danger-red)', boxShadow: '0 0 8px rgba(255, 0, 60, 0.3)' }}>Regenerate API Key</button>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Warning: This will disconnect existing agents.</span>
         </div>
       </div>
