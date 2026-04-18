@@ -2,9 +2,10 @@ import { useState } from 'react';
 
 export default function Install({ token, user }) {
   const [osType, setOsType] = useState('ubuntu');
+  const [panelUrl, setPanelUrl] = useState(window.location.origin);
 
   const handleDownload = () => {
-    fetch(`/api/agent/download?os=${osType}`, {
+    fetch(`/api/agent/download?os=${osType}&serverUrl=${encodeURIComponent(panelUrl)}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     }).then(r => r.blob()).then(blob => {
       const url = window.URL.createObjectURL(blob);
@@ -39,10 +40,20 @@ export default function Install({ token, user }) {
         <div style={{ padding: '20px', borderLeft: '2px solid var(--accent-cyan)', background: 'rgba(0, 51, 255, 0.05)', marginBottom: '20px', borderRadius: '4px' }}>
           <strong style={{ display: 'block', marginBottom: '15px' }}>Step 1: Select OS and Download Installer</strong>
           <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
-            <select value={osType} onChange={e => setOsType(e.target.value)} style={{ width: 'auto' }}>
+            <select value={osType} onChange={e => setOsType(e.target.value)} style={{ width: 'auto', padding: '8px', background: '#05070a', border: '1px solid var(--panel-border)', color: 'white', borderRadius: '4px' }}>
               <option value="ubuntu">Ubuntu (20.04, 22.04, 24.04)</option>
               <option value="debian">Debian (11, 12)</option>
             </select>
+          </div>
+          <div style={{ display: 'flex', gap: '15px', alignItems: 'center', marginTop: '15px' }}>
+            <label style={{ color: 'var(--text-muted)' }}>Panel Public URL:</label>
+            <input 
+              type="text" 
+              value={panelUrl} 
+              onChange={e => setPanelUrl(e.target.value)} 
+              style={{ width: '300px', padding: '8px', background: '#05070a', border: '1px solid var(--panel-border)', color: 'white', borderRadius: '4px' }}
+              placeholder="http://your-public-ip:3000"
+            />
             <button onClick={handleDownload}>Download .sh</button>
           </div>
         </div>

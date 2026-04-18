@@ -55,8 +55,8 @@ table inet detroit_guard {
     # Corrected UDP & ICMP syntax
     meta l4proto udp limit rate 10000/second accept
     meta l4proto udp drop
-    ip protocol icmp icmp type echo-request limit rate 10/second accept
-    ip protocol icmp icmp type echo-request drop
+    icmp type echo-request limit rate 10/second accept
+    icmp type echo-request drop
   }
 
   chain forward {

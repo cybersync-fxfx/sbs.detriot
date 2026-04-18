@@ -209,7 +209,7 @@ app.post('/api/admin/reject', authMiddleware, adminMiddleware, async (req, res) 
 // Agent Installer Download
 app.get('/api/agent/download', authMiddleware, (req, res) => {
   const osType = req.query.os || 'ubuntu';
-  const serverUrl = req.protocol + '://' + req.get('host');
+  const serverUrl = req.query.serverUrl || (req.protocol + '://' + req.get('host'));
   
   let osCheckScript = `OS_VERSION=$(grep -oP '(?<=^VERSION_ID=").*(?=")' /etc/os-release)
 if [[ "$osType" == "ubuntu" ]]; then
@@ -374,8 +374,8 @@ table inet sbs_filter {
     meta l4proto udp limit rate 10000/second accept
     meta l4proto udp drop
     
-    ip protocol icmp icmp type echo-request limit rate 10/second accept
-    ip protocol icmp icmp type echo-request drop
+    icmp type echo-request limit rate 10/second accept
+    icmp type echo-request drop
   }
 }
 EOF
