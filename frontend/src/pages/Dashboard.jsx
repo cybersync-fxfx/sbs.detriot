@@ -33,8 +33,8 @@ export default function Dashboard({ user }) {
   const [chartData, setChartData] = useState({
     labels: Array(40).fill(''),
     datasets: [
-      { label: 'Inbound (Mbps)', borderColor: '#00f0ff', backgroundColor: 'rgba(0, 240, 255, 0.1)', borderWidth: 2, tension: 0.4, fill: true, data: Array(40).fill(0), pointRadius: 0 },
-      { label: 'Outbound (Mbps)', borderColor: '#00ff88', backgroundColor: 'rgba(0, 255, 136, 0.1)', borderWidth: 2, tension: 0.4, fill: true, data: Array(40).fill(0), pointRadius: 0 }
+      { label: 'Inbound (Mbps)', borderColor: '#00e5ff', backgroundColor: 'rgba(0, 229, 255, 0.1)', borderWidth: 2, tension: 0.4, fill: true, data: Array(40).fill(0), pointRadius: 0 },
+      { label: 'Outbound (Mbps)', borderColor: '#ff003c', backgroundColor: 'rgba(255, 0, 60, 0.1)', borderWidth: 2, tension: 0.4, fill: true, data: Array(40).fill(0), pointRadius: 0 }
     ]
   });
 
@@ -101,22 +101,22 @@ export default function Dashboard({ user }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px', marginBottom: '20px' }}>
         <div className="glass-panel" style={{ position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', background: 'var(--accent-cyan)', boxShadow: '0 0 10px var(--accent-cyan)' }}></div>
+          <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', background: 'var(--accent-cyan)', boxShadow: '0 0 10px var(--accent-glow)' }}></div>
           <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '10px' }}>Connections (ESTAB)</div>
           <div style={{ fontSize: '2rem', fontFamily: 'var(--font-mono)', fontWeight: 'bold' }}>{stats.connections}</div>
         </div>
         <div className="glass-panel" style={{ position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', background: 'var(--danger-red)', boxShadow: '0 0 10px var(--danger-red)' }}></div>
+          <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', background: 'var(--danger-red)', boxShadow: '0 0 10px var(--danger-glow)' }}></div>
           <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '10px' }}>Banned IPs</div>
           <div style={{ fontSize: '2rem', fontFamily: 'var(--font-mono)', fontWeight: 'bold' }}>{stats.bannedIPs}</div>
         </div>
         <div className="glass-panel" style={{ position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', background: 'var(--warn-amber)', boxShadow: '0 0 10px var(--warn-amber)' }}></div>
+          <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', background: 'var(--accent-cyan)', boxShadow: '0 0 10px var(--accent-glow)' }}></div>
           <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '10px' }}>CPU Usage</div>
           <div style={{ fontSize: '2rem', fontFamily: 'var(--font-mono)', fontWeight: 'bold' }}>{stats.cpuPercent.toFixed(1)}%</div>
         </div>
         <div className="glass-panel" style={{ position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', background: 'var(--success-green)', boxShadow: '0 0 10px var(--success-green)' }}></div>
+          <div style={{ position: 'absolute', top: 0, left: 0, width: '4px', height: '100%', background: 'var(--danger-red)', boxShadow: '0 0 10px var(--danger-glow)' }}></div>
           <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '10px' }}>Memory Usage</div>
           <div style={{ fontSize: '2rem', fontFamily: 'var(--font-mono)', fontWeight: 'bold' }}>{(stats.memPercent || 0).toFixed(1)}%</div>
         </div>

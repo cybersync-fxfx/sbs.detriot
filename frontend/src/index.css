@@ -1,16 +1,17 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
-  --bg-dark: #0a0c10;
-  --panel-bg: rgba(16, 20, 26, 0.65);
-  --panel-border: rgba(255, 255, 255, 0.08);
-  --accent-cyan: #00f0ff;
-  --accent-glow: rgba(0, 240, 255, 0.4);
-  --danger-red: #ff3366;
-  --success-green: #00ff88;
-  --warn-amber: #ffb800;
+  --bg-dark: #000000;
+  --panel-bg: rgba(5, 5, 10, 0.85);
+  --panel-border: rgba(0, 229, 255, 0.15);
+  --accent-cyan: #00e5ff;
+  --accent-glow: rgba(0, 229, 255, 0.5);
+  --danger-red: #ff003c;
+  --danger-glow: rgba(255, 0, 60, 0.5);
+  --success-green: #00e5ff; /* Changing green to electric blue per user request */
+  --warn-amber: #ff003c; /* Changing amber to red per user request */
   --text-main: #f1f5f9;
-  --text-muted: #94a3b8;
+  --text-muted: #8b9bb4;
   
   --font-body: 'Inter', sans-serif;
   --font-display: 'Orbitron', sans-serif;
@@ -32,7 +33,8 @@ body::before {
   content: "";
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: radial-gradient(circle at 50% 0%, rgba(0, 240, 255, 0.05), transparent 60%);
+  background: radial-gradient(circle at 50% 0%, rgba(0, 229, 255, 0.06), transparent 50%),
+              radial-gradient(circle at 50% 100%, rgba(255, 0, 60, 0.04), transparent 50%);
   z-index: -1;
   pointer-events: none;
 }
@@ -57,11 +59,11 @@ input, select {
 
 input:focus, select:focus { 
   border-color: var(--accent-cyan); 
-  box-shadow: 0 0 10px rgba(0, 240, 255, 0.15); 
+  box-shadow: 0 0 15px rgba(0, 229, 255, 0.2); 
 }
 
 button {
-  background: rgba(0, 240, 255, 0.05);
+  background: rgba(0, 229, 255, 0.08);
   border: 1px solid var(--accent-cyan);
   color: var(--accent-cyan);
   padding: 12px 24px;
@@ -83,8 +85,8 @@ button:hover {
   box-shadow: 0 0 20px var(--accent-glow);
 }
 
-button.danger { border-color: var(--danger-red); color: var(--danger-red); background: rgba(255, 51, 102, 0.05); }
-button.danger:hover { background: var(--danger-red); color: white; box-shadow: 0 0 20px rgba(255, 51, 102, 0.4); }
+button.danger { border-color: var(--danger-red); color: var(--danger-red); background: rgba(255, 0, 60, 0.08); }
+button.danger:hover { background: var(--danger-red); color: white; box-shadow: 0 0 20px var(--danger-glow); }
 
 .glass-panel {
   background: var(--panel-bg);
