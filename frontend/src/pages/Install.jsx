@@ -3,21 +3,38 @@ import { useState } from 'react';
 export default function Install({ token, user }) {
   const [osType, setOsType] = useState('ubuntu');
   const [panelUrl, setPanelUrl] = useState(window.location.origin);
+  const [feedback, setFeedback] = useState('');
+  const [isBusy, setIsBusy] = useState(false);
 
-  const handleDownload = () => {
-    fetch(`/api/agent/download?os=${osType}&serverUrl=${encodeURIComponent(panelUrl)}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-      .then(r => r.blob())
-      .then(blob => {
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `sbs-agent-${user.agentId}.sh`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+  const handleDownload = async () => {
+    setFeedback('');
+    setIsBusy(true);
+
+    try {
+      const response = await fetch(`/api/agent/download?os=${osType}&serverUrl=${encodeURIComponent(panelUrl)}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to generate installer.');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sbs-agent-${user.agentId}.sh`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      setFeedback('Fresh installer downloaded. Upload it to the target server and run it as root.');
+    } catch (error) {
+      setFeedback(error.message);
+    } finally {
+      setIsBusy(false);
+    }
   };
 
   return (
@@ -70,8 +87,16 @@ export default function Install({ token, user }) {
               Download a fresh installer whenever you change the API key or panel domain. This build connects the agent to the dashboard first; GRE routing stays deferred.
             </div>
 
+            {feedback ? (
+              <div className={`callout-inline ${feedback.toLowerCase().includes('downloaded') ? 'success' : 'danger'}`}>
+                {feedback}
+              </div>
+            ) : null}
+
             <div className="button-row">
-              <button type="button" onClick={handleDownload}>Download Installer</button>
+              <button type="button" onClick={handleDownload} disabled={isBusy}>
+                {isBusy ? 'Preparing Installer...' : 'Download Installer'}
+              </button>
             </div>
           </div>
         </article>

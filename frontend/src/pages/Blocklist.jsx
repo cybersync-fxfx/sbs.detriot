@@ -14,8 +14,9 @@ export default function Blocklist({ token, user }) {
   const [rawOutput, setRawOutput] = useState('');
   const [feedback, setFeedback] = useState('');
   const [isBusy, setIsBusy] = useState(false);
-  const { sendCommand, agentStatus } = useAgentCommands(token);
+  const { sendCommand, agentStatus, socketState } = useAgentCommands(token);
   const liveAgentStatus = agentStatus === 'unknown' ? user?.agentStatus : agentStatus;
+  const commandReady = liveAgentStatus === 'CONNECTED' && socketState === 'open';
 
   const refreshBlocklist = async () => {
     setFeedback('');
@@ -115,13 +116,13 @@ export default function Blocklist({ token, user }) {
               placeholder="203.0.113.24"
               value={ipInput}
               onChange={e => setIpInput(e.target.value)}
-              disabled={isBusy || liveAgentStatus !== 'CONNECTED'}
+              disabled={isBusy || !commandReady}
             />
             <div className="button-row">
-              <button className="danger" type="button" onClick={banIp} disabled={isBusy || liveAgentStatus !== 'CONNECTED'}>
+              <button className="danger" type="button" onClick={banIp} disabled={isBusy || !commandReady}>
                 Ban IP
               </button>
-              <button type="button" onClick={refreshBlocklist} disabled={isBusy || liveAgentStatus !== 'CONNECTED'}>
+              <button type="button" onClick={refreshBlocklist} disabled={isBusy || !commandReady}>
                 Refresh From Server
               </button>
             </div>
@@ -157,7 +158,7 @@ export default function Blocklist({ token, user }) {
                           type="button"
                           className="secondary-button small"
                           onClick={() => removeIp(ip)}
-                          disabled={isBusy || liveAgentStatus !== 'CONNECTED'}
+                          disabled={isBusy || !commandReady}
                         >
                           Remove
                         </button>

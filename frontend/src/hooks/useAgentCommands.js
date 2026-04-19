@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 export function useAgentCommands(token) {
   const pendingRef = useRef(new Map());
+  const socketRef = useRef(null);
   const [socketState, setSocketState] = useState('idle');
   const [agentStatus, setAgentStatus] = useState('unknown');
   const [lastEvent, setLastEvent] = useState(null);
@@ -11,6 +12,7 @@ export function useAgentCommands(token) {
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
+    socketRef.current = ws;
 
     setSocketState('connecting');
 
@@ -47,11 +49,16 @@ export function useAgentCommands(token) {
         reject(new Error('Command socket closed before a response was received.'));
       });
       pendingRef.current.clear();
+      socketRef.current = null;
       ws.close();
     };
   }, [token]);
 
   const sendCommand = async (cmd, { timeoutMs = 45000 } = {}) => {
+    if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+      throw new Error('Command channel is not ready yet. Wait for the socket to open and try again.');
+    }
+
     const res = await fetch('/api/command', {
       method: 'POST',
       headers: {

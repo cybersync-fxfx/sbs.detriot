@@ -29,8 +29,9 @@ export default function Firewall({ token, user }) {
   const [output, setOutput] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [isBusy, setIsBusy] = useState(false);
-  const { sendCommand, agentStatus } = useAgentCommands(token);
+  const { sendCommand, agentStatus, socketState } = useAgentCommands(token);
   const liveAgentStatus = agentStatus === 'unknown' ? user?.agentStatus : agentStatus;
+  const commandReady = liveAgentStatus === 'CONNECTED' && socketState === 'open';
 
   const runInspection = async (action) => {
     setActiveCommand(action.title);
@@ -82,7 +83,7 @@ export default function Firewall({ token, user }) {
                 type="button"
                 className="action-card"
                 onClick={() => runInspection(action)}
-                disabled={isBusy || liveAgentStatus !== 'CONNECTED'}
+                disabled={isBusy || !commandReady}
               >
                 <span className="action-card-title">{action.title}</span>
                 <span className="action-card-copy">{action.description}</span>

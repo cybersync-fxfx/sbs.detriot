@@ -291,8 +291,6 @@ const config = {
   enableTunnel: process.env.SBS_ENABLE_TUNNEL === '1'
 };
 
-const reqModule = config.server.startsWith('https') ? https : http;
-
 function log(message) {
   const line = '[' + new Date().toISOString() + '] ' + message;
   try {
@@ -303,6 +301,7 @@ function log(message) {
 
 function makeRequest(path, method, data, callback, redirectCount = 0) {
   const url = new URL(path, config.server);
+  const reqModule = url.protocol === 'https:' ? https : http;
   const options = {
     method,
     headers: {

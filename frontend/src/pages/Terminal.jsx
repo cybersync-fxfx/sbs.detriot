@@ -19,6 +19,7 @@ export default function Terminal({ token, user }) {
   const [isRunning, setIsRunning] = useState(false);
   const logEndRef = useRef(null);
   const { sendCommand, agentStatus, lastEvent, socketState } = useAgentCommands(token);
+  const commandReady = user?.agentStatus === 'CONNECTED' && socketState === 'open';
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -102,11 +103,11 @@ export default function Terminal({ token, user }) {
             onChange={(e) => setInput(e.target.value)}
             className="terminal-input"
             autoComplete="off"
-            disabled={isRunning}
+            disabled={isRunning || !commandReady}
             placeholder="Enter a Linux command"
           />
-          <button type="submit" disabled={isRunning || user?.agentStatus !== 'CONNECTED'}>
-            {isRunning ? 'Running…' : 'Execute'}
+          <button type="submit" disabled={isRunning || !commandReady}>
+            {isRunning ? 'Running...' : 'Execute'}
           </button>
         </form>
 
@@ -117,7 +118,7 @@ export default function Terminal({ token, user }) {
               type="button"
               className="secondary-button"
               onClick={() => runCommand(cmd)}
-              disabled={isRunning || user?.agentStatus !== 'CONNECTED'}
+              disabled={isRunning || !commandReady}
             >
               {cmd}
             </button>

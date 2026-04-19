@@ -75,7 +75,7 @@ export default function ApiKeys({ token, user, setUser }) {
           <p className="eyebrow">Credentials</p>
           <h1 className="page-title">API & Keys</h1>
           <p className="page-copy">
-            These credentials bind a server to your account. Keep the API key private and treat the agent ID as the server’s public handle.
+            These credentials bind a server to your account. Keep the API key private and treat the agent ID as the server's public handle.
           </p>
         </div>
         <div className="hero-status-stack">

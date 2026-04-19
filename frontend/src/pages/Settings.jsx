@@ -124,7 +124,7 @@ export default function Settings({ token, user }) {
               onClick={handleRemoveTunnel}
               disabled={isBusy || tunnelStatus !== 'active'}
             >
-              {isBusy ? 'Disconnecting…' : 'Disconnect Protection'}
+              {isBusy ? 'Disconnecting...' : 'Disconnect Protection'}
             </button>
           </div>
         </article>
