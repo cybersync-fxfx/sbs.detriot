@@ -36,6 +36,27 @@ function App() {
     }
   }, [token]);
 
+  useEffect(() => {
+    if (!token || !user) return undefined;
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
+
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+
+      if (msg.type === 'agent_connected' || msg.type === 'stats_update') {
+        setUser(prev => prev ? { ...prev, agentStatus: 'CONNECTED' } : prev);
+      }
+
+      if (msg.type === 'agent_disconnected') {
+        setUser(prev => prev ? { ...prev, agentStatus: 'NO AGENT' } : prev);
+      }
+    };
+
+    return () => ws.close();
+  }, [token, user?.id, user?.agentId]);
+
   if (loading) return <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center' }}>Loading...</div>;
 
   return (
@@ -47,11 +68,11 @@ function App() {
           <Route element={<Layout user={user} setToken={setToken} />}>
             <Route path="/" element={<Dashboard user={user} />} />
             <Route path="/terminal" element={<Terminal token={token} user={user} />} />
-            <Route path="/firewall" element={<Firewall token={token} />} />
-            <Route path="/blocklist" element={<Blocklist token={token} />} />
+            <Route path="/firewall" element={<Firewall token={token} user={user} />} />
+            <Route path="/blocklist" element={<Blocklist token={token} user={user} />} />
             <Route path="/install" element={<Install token={token} user={user} />} />
             <Route path="/apikeys" element={<ApiKeys token={token} user={user} setUser={setUser} />} />
-            <Route path="/settings" element={<Settings user={user} />} />
+            <Route path="/settings" element={<Settings token={token} user={user} />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Route>
         )}

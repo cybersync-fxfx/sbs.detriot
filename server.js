@@ -66,6 +66,23 @@ const normalizeIp = (value) => {
   return candidate.replace(/^::ffff:/, '');
 };
 
+const upsertAgentState = (agentId, partial) => {
+  db.agents[agentId] = {
+    ...db.agents[agentId],
+    ...partial,
+    lastSeen: Date.now()
+  };
+  return db.agents[agentId];
+};
+
+const buildAgentConnectedMessage = (agent) => ({
+  type: 'agent_connected',
+  hostname: agent.hostname || '-',
+  ip: agent.ip || '-',
+  os: agent.os || 'Ubuntu',
+  agentStatus: 'CONNECTED'
+});
+
 // Middleware
 const authMiddleware = async (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
@@ -183,6 +200,7 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/me', authMiddleware, (req, res) => {
   const agentStatus = db.agents[req.user.agent_id] ? 'CONNECTED' : 'NO AGENT';
   res.json({
+    id: req.user.id,
     username: req.user.username,
     email: req.user.email,
     apiKey: req.user.api_key,
@@ -275,16 +293,39 @@ const config = {
 
 const reqModule = config.server.startsWith('https') ? https : http;
 
-function makeRequest(path, method, data, callback) {
+function log(message) {
+  const line = '[' + new Date().toISOString() + '] ' + message;
+  try {
+    fs.appendFileSync('/var/log/sbs/agent.log', line + '\\n');
+  } catch (e) {}
+  console.log(line);
+}
+
+function makeRequest(path, method, data, callback, redirectCount = 0) {
   const url = new URL(path, config.server);
   const options = {
     method,
-    headers: { 'Content-Type': 'application/json' }
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': 'sbs-agent/1.0'
+    }
   };
   const req = reqModule.request(url, options, (res) => {
     let body = '';
     res.on('data', chunk => body += chunk);
-    res.on('end', () => callback && callback(null, body));
+    res.on('end', () => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirectCount < 3) {
+        const redirectedUrl = new URL(res.headers.location, url);
+        config.server = redirectedUrl.origin;
+        return makeRequest(redirectedUrl.pathname + redirectedUrl.search, method, data, callback, redirectCount + 1);
+      }
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        const error = new Error('HTTP ' + res.statusCode + ' for ' + path + ': ' + body);
+        error.statusCode = res.statusCode;
+        return callback && callback(error, body);
+      }
+      callback && callback(null, body);
+    });
   });
   req.on('error', (e) => callback && callback(e));
   if (data) req.write(JSON.stringify(data));
@@ -295,8 +336,12 @@ function registerTunnel() {
   makeRequest('/api/agent/tunnel/create', 'POST', {
     agentId: config.agentId,
     apiKey: config.apiKey
-  }, (err, res) => {
-    if (!err) console.log('[SBS] Tunnel registered with guard');
+  }, (err) => {
+    if (err) {
+      log('[tunnel] ' + err.message);
+      return;
+    }
+    log('[tunnel] registered with guard');
   });
 }
 
@@ -309,7 +354,12 @@ function register() {
     os: 'Ubuntu',
     arch: process.arch
   }, (err) => {
-    if (!err && config.enableTunnel) registerTunnel();
+    if (err) {
+      log('[register] ' + err.message);
+      return;
+    }
+    log('[register] connected to panel');
+    if (config.enableTunnel) registerTunnel();
   });
 }
 
@@ -356,6 +406,7 @@ function pollCommands() {
 }
 
 register();
+setInterval(register, 15000);
 setInterval(sendStats, 5000);
 setInterval(pollCommands, 3000);
 EOF
@@ -369,6 +420,7 @@ EOF
 
 mkdir -p /var/log/sbs
 touch /var/log/sbs/attacks.log
+touch /var/log/sbs/agent.log
 
 cat << 'EOF' > /etc/nftables.conf
 #!/usr/sbin/nft -f
@@ -439,24 +491,38 @@ echo "Check your dashboard for connection status."
 app.post('/api/agent/register', agentAuthMiddleware, (req, res) => {
   const { agentId } = req.user;
   const requestIp = normalizeIp(req.headers['x-forwarded-for'] || req.socket.remoteAddress);
-  db.agents[agentId] = {
+  const agent = upsertAgentState(agentId, {
+    userId: req.user.id,
     hostname: req.body.hostname,
     ip: requestIp,
     os: req.body.os,
-    arch: req.body.arch,
-    lastSeen: Date.now()
-  };
-  broadcastToUser(req.user.id, { type: 'agent_connected', hostname: db.agents[agentId].hostname, ip: db.agents[agentId].ip });
+    arch: req.body.arch
+  });
+  console.log(`[agent] Registered ${agentId} from ${agent.ip} (${agent.hostname || 'unknown-host'})`);
+  broadcastToUser(req.user.id, buildAgentConnectedMessage(agent));
   res.json({ success: true });
 });
 
 app.post('/api/agent/stats', agentAuthMiddleware, (req, res) => {
   const { agentId } = req.user;
-  if (!db.agents[agentId]) db.agents[agentId] = { lastSeen: Date.now() };
-  db.agents[agentId].lastSeen = Date.now();
+  const requestIp = normalizeIp(req.headers['x-forwarded-for'] || req.socket.remoteAddress);
+  const agent = upsertAgentState(agentId, {
+    userId: req.user.id,
+    ip: requestIp
+  });
   
   const stats = req.body;
-  broadcastToUser(req.user.id, { type: 'stats_update', stats, log: stats.log });
+  broadcastToUser(req.user.id, {
+    type: 'stats_update',
+    stats,
+    log: stats.log,
+    agentStatus: 'CONNECTED',
+    agent: {
+      hostname: agent.hostname || '-',
+      ip: agent.ip || '-',
+      os: agent.os || 'Ubuntu'
+    }
+  });
   res.json({ success: true });
 });
 
@@ -566,7 +632,7 @@ wss.on('connection', async (ws, req) => {
     const { data: profile } = await userClient.from('user_profiles').select('agent_id').eq('id', user.id).single();
     
     if (profile && db.agents[profile.agent_id]) {
-      ws.send(JSON.stringify({ type: 'agent_connected', hostname: db.agents[profile.agent_id].hostname, ip: db.agents[profile.agent_id].ip }));
+      ws.send(JSON.stringify(buildAgentConnectedMessage(db.agents[profile.agent_id])));
     }
     
     ws.on('close', () => {
@@ -594,13 +660,16 @@ setInterval(() => {
   for (const [agentId, agent] of Object.entries(db.agents)) {
     if (now - agent.lastSeen > 30000) {
       delete db.agents[agentId];
-      // Note: We don't have user_id easily mapping to agentId here natively in memory,
-      // but the heartbeat missing will reflect if we do a reverse lookup.
-      // For simplicity in Anon setup without keeping user IDs mapped in memory:
-      // We will skip broadcasting disconnected here; frontend times out if it doesn't get stats.
+      if (agent.userId) {
+        broadcastToUser(agent.userId, { type: 'agent_disconnected', agentId, agentStatus: 'NO AGENT' });
+      }
     }
   }
 }, 5000);
+
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true });
+});
 
 // Catch all for SPA
 app.use((req, res) => {

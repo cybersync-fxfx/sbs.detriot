@@ -7,71 +7,99 @@ export default function Install({ token, user }) {
   const handleDownload = () => {
     fetch(`/api/agent/download?os=${osType}&serverUrl=${encodeURIComponent(panelUrl)}`, {
       headers: { 'Authorization': `Bearer ${token}` }
-    }).then(r => r.blob()).then(blob => {
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `sbs-agent-${user.agentId}.sh`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    });
+    })
+      .then(r => r.blob())
+      .then(blob => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `sbs-agent-${user.agentId}.sh`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      });
   };
 
   return (
-    <div>
-      <h2 style={{ marginBottom: '20px', color: 'var(--accent-cyan)' }}>Install Agent</h2>
-      
-      <div className="glass-panel">
-        <h3 style={{ marginBottom: '15px' }}>Installation Steps</h3>
-        
-        <div style={{ background: '#05070a', border: '1px solid var(--panel-border)', borderRadius: '8px', padding: '20px', marginBottom: '20px' }}>
-          <h4 style={{ marginBottom: '15px', color: 'var(--success-green)' }}>System Status</h4>
-          <ul style={{ listStyle: 'none', lineHeight: '2' }}>
-            <li>✅ Agent Connected</li>
-            <li>✅ GRE Tunnel Active</li>
-            <li>✅ Traffic Routing Through Guard</li>
-            <li>✅ Real IP Hidden</li>
-          </ul>
+    <div className="page-shell">
+      <section className="hero-panel compact">
+        <div>
+          <p className="eyebrow">Deployment</p>
+          <h1 className="page-title">Install Agent</h1>
+          <p className="page-copy">
+            Generate a per-user installer, ship it to the target Linux server, and bring that server into the dashboard with one command.
+          </p>
         </div>
-        
-        <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>Follow these steps to deploy the SBS agent on your target server. You must have root access.</p>
-        
-        <div style={{ padding: '20px', borderLeft: '2px solid var(--accent-cyan)', background: 'rgba(0, 51, 255, 0.05)', marginBottom: '20px', borderRadius: '4px' }}>
-          <strong style={{ display: 'block', marginBottom: '15px' }}>Step 1: Select OS and Download Installer</strong>
-          <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
-            <select value={osType} onChange={e => setOsType(e.target.value)} style={{ width: 'auto', padding: '8px', background: '#05070a', border: '1px solid var(--panel-border)', color: 'white', borderRadius: '4px' }}>
-              <option value="ubuntu">Ubuntu (20.04, 22.04, 24.04)</option>
-              <option value="debian">Debian (11, 12)</option>
-            </select>
+        <div className="hero-status-stack">
+          <div className={`status-pill ${user?.agentStatus === 'CONNECTED' ? 'connected' : 'disconnected'}`}>
+            {user?.agentStatus || 'NO AGENT'}
           </div>
-          <div style={{ display: 'flex', gap: '15px', alignItems: 'center', marginTop: '15px' }}>
-            <label style={{ color: 'var(--text-muted)' }}>Panel Public URL:</label>
-            <input 
-              type="text" 
-              value={panelUrl} 
-              onChange={e => setPanelUrl(e.target.value)} 
-              style={{ width: '300px', padding: '8px', background: '#05070a', border: '1px solid var(--panel-border)', color: 'white', borderRadius: '4px' }}
-              placeholder="http://your-public-ip:3000"
-            />
-            <button onClick={handleDownload}>Download .sh</button>
-          </div>
+          <div className="meta-chip">{user?.agentId}</div>
         </div>
+      </section>
 
-        <div style={{ padding: '20px', borderLeft: '2px solid var(--accent-cyan)', background: 'rgba(0, 51, 255, 0.05)', marginBottom: '20px', borderRadius: '4px' }}>
-          <strong style={{ display: 'block', marginBottom: '15px' }}>Step 2: Upload to your server</strong>
-          <div style={{ background: '#05070a', padding: '15px', borderRadius: '4px', border: '1px solid var(--panel-border)', fontFamily: 'var(--font-mono)', color: 'var(--accent-cyan)' }}>
-            scp sbs-agent-{user?.agentId}.sh root@YOUR_SERVER_IP:/root/
+      <section className="content-grid two-up">
+        <article className="glass-panel elevated-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Generator</p>
+              <h3>Create Installer</h3>
+            </div>
           </div>
-        </div>
 
-        <div style={{ padding: '20px', borderLeft: '2px solid var(--accent-cyan)', background: 'rgba(0, 51, 255, 0.05)', borderRadius: '4px' }}>
-          <strong style={{ display: 'block', marginBottom: '15px' }}>Step 3: Run the installer</strong>
-          <div style={{ background: '#05070a', padding: '15px', borderRadius: '4px', border: '1px solid var(--panel-border)', fontFamily: 'var(--font-mono)', color: 'var(--accent-cyan)' }}>
-            sudo bash /root/sbs-agent-{user?.agentId}.sh
+          <div className="form-stack">
+            <label>
+              <span className="credential-label">Target OS</span>
+              <select value={osType} onChange={e => setOsType(e.target.value)}>
+                <option value="ubuntu">Ubuntu (20.04, 22.04, 24.04)</option>
+                <option value="debian">Debian (11, 12)</option>
+              </select>
+            </label>
+
+            <label>
+              <span className="credential-label">Panel Public URL</span>
+              <input
+                type="text"
+                value={panelUrl}
+                onChange={e => setPanelUrl(e.target.value)}
+                placeholder="https://your-panel-domain"
+              />
+            </label>
+
+            <div className="callout-inline warning">
+              Download a fresh installer whenever you change the API key or panel domain. This build connects the agent to the dashboard first; GRE routing stays deferred.
+            </div>
+
+            <div className="button-row">
+              <button type="button" onClick={handleDownload}>Download Installer</button>
+            </div>
           </div>
-        </div>
-      </div>
+        </article>
+
+        <article className="glass-panel elevated-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Runbook</p>
+              <h3>Operator Steps</h3>
+            </div>
+          </div>
+
+          <div className="stack-list">
+            <div className="action-card">
+              <span className="action-card-title">1. Upload the installer</span>
+              <span className="action-card-copy command-output">scp sbs-agent-{user?.agentId}.sh root@YOUR_SERVER_IP:/root/</span>
+            </div>
+            <div className="action-card">
+              <span className="action-card-title">2. Run it as root</span>
+              <span className="action-card-copy command-output">sudo bash /root/sbs-agent-{user?.agentId}.sh</span>
+            </div>
+            <div className="action-card">
+              <span className="action-card-title">3. Watch the dashboard</span>
+              <span className="action-card-copy">Keep this tab open. The status badge should flip to connected when the agent registers and starts sending telemetry.</span>
+            </div>
+          </div>
+        </article>
+      </section>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 const CopyIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -13,9 +13,25 @@ const CheckIcon = () => (
   </svg>
 );
 
+function CredentialRow({ label, value, copied, onCopy }) {
+  return (
+    <div className="credential-row">
+      <div className="credential-meta">
+        <span className="credential-label">{label}</span>
+        <span className="credential-value">{value || '-'}</span>
+      </div>
+      <button type="button" className="icon-button" onClick={onCopy} aria-label={`Copy ${label}`}>
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </button>
+    </div>
+  );
+}
+
 export default function ApiKeys({ token, user, setUser }) {
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
+  const [feedback, setFeedback] = useState('');
+  const panelOrigin = useMemo(() => window.location.origin, []);
 
   const handleCopy = (text, type) => {
     navigator.clipboard.writeText(text);
@@ -27,87 +43,102 @@ export default function ApiKeys({ token, user, setUser }) {
       setTimeout(() => setCopiedId(false), 2000);
     }
   };
+
   const regenerateKey = async () => {
-    if (!confirm('Regenerating API Key will disconnect your current agent. Proceed?')) return;
+    if (!confirm('Regenerating the API key will require the agent to use a fresh installer or updated environment file. Continue?')) return;
+
+    setFeedback('');
+
     try {
-      const res = await fetch('/api/me/regenerate-key', { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await fetch('/api/me/regenerate-key', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to regenerate API key.');
+      }
+
       if (data.apiKey) {
         setUser(prev => ({ ...prev, apiKey: data.apiKey }));
-        alert('Key regenerated successfully.');
+        setFeedback('API key regenerated. Download a fresh installer before reconnecting the agent.');
       }
-    } catch (e) {
-      alert('Error regenerating key');
+    } catch (error) {
+      setFeedback(error.message);
     }
   };
 
   return (
-    <div>
-      <h2 style={{ marginBottom: '20px', color: 'var(--accent-cyan)' }}>API & Credentials</h2>
-      <div className="glass-panel" style={{ marginBottom: '20px', borderTop: '2px solid var(--danger-red)' }}>
-        <h3 style={{ marginBottom: '20px' }}>Your Credentials</h3>
-        <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', alignItems: 'center' }}>
-          <label style={{ flex: 1, color: 'var(--text-muted)' }}>Agent ID (Public identifier)</label>
-          <input type="text" value={user?.agentId || ''} readOnly style={{ flex: 2 }} />
-          <button 
-            onClick={() => handleCopy(user?.agentId, 'id')}
-            title="Copy Agent ID"
-            style={{
-              padding: '8px 12px',
-              background: copiedId ? 'var(--accent-cyan)' : 'transparent',
-              color: copiedId ? '#000' : 'var(--accent-cyan)',
-              border: `1px solid var(--accent-cyan)`,
-              boxShadow: copiedId ? '0 0 15px var(--accent-cyan)' : '0 0 5px rgba(0, 51, 255, 0.2)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'all 0.2s',
-              borderRadius: '4px'
-            }}
-          >
-            {copiedId ? <CheckIcon /> : <CopyIcon />}
-          </button>
+    <div className="page-shell">
+      <section className="hero-panel compact">
+        <div>
+          <p className="eyebrow">Credentials</p>
+          <h1 className="page-title">API & Keys</h1>
+          <p className="page-copy">
+            These credentials bind a server to your account. Keep the API key private and treat the agent ID as the server’s public handle.
+          </p>
         </div>
-        <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', alignItems: 'center' }}>
-          <label style={{ flex: 1, color: 'var(--text-muted)' }}>API Key (Secret token)</label>
-          <input type="text" value={user?.apiKey || ''} readOnly style={{ flex: 2 }} />
-          <button 
-            onClick={() => handleCopy(user?.apiKey, 'key')}
-            title="Copy API Key"
-            style={{
-              padding: '8px 12px',
-              background: copiedKey ? 'var(--accent-cyan)' : 'transparent',
-              color: copiedKey ? '#000' : 'var(--accent-cyan)',
-              border: `1px solid var(--accent-cyan)`,
-              boxShadow: copiedKey ? '0 0 15px var(--accent-cyan)' : '0 0 5px rgba(0, 51, 255, 0.2)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'all 0.2s',
-              borderRadius: '4px'
-            }}
-          >
-            {copiedKey ? <CheckIcon /> : <CopyIcon />}
-          </button>
+        <div className="hero-status-stack">
+          <div className={`status-pill ${user?.agentStatus === 'CONNECTED' ? 'connected' : 'disconnected'}`}>
+            {user?.agentStatus || 'NO AGENT'}
+          </div>
+          <div className="meta-chip">{user?.agentId || 'No agent ID'}</div>
         </div>
-        <div style={{ marginTop: '30px', display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <button className="danger" onClick={regenerateKey} style={{ background: 'transparent', color: 'var(--danger-red)', border: '1px solid var(--danger-red)', boxShadow: '0 0 8px rgba(255, 0, 60, 0.3)' }}>Regenerate API Key</button>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Warning: This will disconnect existing agents.</span>
-        </div>
-      </div>
+      </section>
 
-      <div className="glass-panel">
-        <h3 style={{ marginBottom: '15px' }}>REST API Access</h3>
-        <p style={{ color: 'var(--text-muted)', marginBottom: '15px' }}>You can trigger commands programmatically.</p>
-        <div style={{ background: '#05070a', padding: '15px', borderRadius: '4px', border: '1px solid var(--panel-border)', fontFamily: 'var(--font-mono)', color: 'var(--accent-cyan)', wordBreak: 'break-all' }}>
-          curl -X POST http://YOUR_PANEL/api/command \<br/>
-          -H "Authorization: Bearer YOUR_JWT_TOKEN" \<br/>
-          -H "Content-Type: application/json" \<br/>
-          -d '{`"cmd": "iptables -L"`}'
-        </div>
-      </div>
+      <section className="content-grid two-up">
+        <article className="glass-panel elevated-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Secrets</p>
+              <h3>Linked Credentials</h3>
+            </div>
+          </div>
+
+          <div className="credential-stack">
+            <CredentialRow
+              label="Agent ID"
+              value={user?.agentId}
+              copied={copiedId}
+              onCopy={() => handleCopy(user?.agentId, 'id')}
+            />
+            <CredentialRow
+              label="API Key"
+              value={user?.apiKey}
+              copied={copiedKey}
+              onCopy={() => handleCopy(user?.apiKey, 'key')}
+            />
+          </div>
+
+          <div className="callout-inline warning">
+            Regenerating the API key immediately invalidates the old key for future agent authentication.
+          </div>
+
+          {feedback ? <div className="callout-inline success">{feedback}</div> : null}
+
+          <div className="button-row">
+            <button type="button" className="danger" onClick={regenerateKey}>
+              Regenerate API Key
+            </button>
+          </div>
+        </article>
+
+        <article className="glass-panel elevated-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Example</p>
+              <h3>REST Command Request</h3>
+            </div>
+          </div>
+
+          <pre className="command-output">
+{`curl -X POST ${panelOrigin}/api/command \\
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{"cmd":"nft list ruleset"}'`}
+          </pre>
+        </article>
+      </section>
     </div>
   );
 }

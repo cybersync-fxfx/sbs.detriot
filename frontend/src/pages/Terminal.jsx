@@ -1,89 +1,129 @@
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useAgentCommands } from '../hooks/useAgentCommands';
 
-export default function Terminal({ token }) {
+const quickActions = [
+  'uptime',
+  'free -h',
+  'df -h',
+  'ss -ant | wc -l',
+  'systemctl status sbs-agent --no-pager',
+  'tail -n 40 /var/log/sbs/agent.log',
+];
+
+export default function Terminal({ token, user }) {
   const [logs, setLogs] = useState([
-    { text: 'SBS Secure Terminal Interface v1.0', level: 'info' },
-    { text: 'Connection established. Type a command or use quick actions below.', level: 'default' }
+    { text: 'SBS Secure Terminal Interface', level: 'info' },
+    { text: 'Run commands through the connected agent. Responses stream back when the agent completes the command.', level: 'default' }
   ]);
   const [input, setInput] = useState('');
+  const [isRunning, setIsRunning] = useState(false);
   const logEndRef = useRef(null);
+  const { sendCommand, agentStatus, lastEvent, socketState } = useAgentCommands(token);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
-  const sendCmd = async (cmd) => {
+  useEffect(() => {
+    if (lastEvent?.type === 'agent_connected') {
+      setLogs(prev => [...prev, { text: `Agent connected from ${lastEvent.ip || 'unknown ip'} (${lastEvent.hostname || 'server'})`, level: 'success' }]);
+    }
+    if (lastEvent?.type === 'agent_disconnected') {
+      setLogs(prev => [...prev, { text: 'Agent disconnected or heartbeat expired.', level: 'error' }]);
+    }
+  }, [lastEvent]);
+
+  const runCommand = async (cmd) => {
+    if (!cmd.trim()) return;
+
+    setLogs(prev => [...prev, { text: `> ${cmd}`, level: 'info' }]);
+    setIsRunning(true);
+
     try {
-      const res = await fetch('/api/command', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cmd })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setLogs(prev => [...prev, { text: data.error, level: 'error' }]);
-        return;
-      }
-      setLogs(prev => [...prev, { text: `> ${cmd}`, level: 'info' }]);
-      // The WebSocket in App could handle the response, but for simplicity we will just assume
-      // the websocket pushes command_result. But since Dashboard handles WS, we should pull WS handling to a shared context if needed.
-      // Wait, let's just make Terminal connect to WS just for commands.
-    } catch (e) {
-      setLogs(prev => [...prev, { text: 'Network Error', level: 'error' }]);
+      const result = await sendCommand(cmd.trim());
+      setLogs(prev => [...prev, { text: result.output || '(no output returned)', level: result.exitCode === 0 ? 'default' : 'error' }]);
+    } catch (error) {
+      setLogs(prev => [...prev, { text: error.message, level: 'error' }]);
+    } finally {
+      setIsRunning(false);
     }
   };
 
-  useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
-    ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      if (msg.type === 'command_result') {
-        setLogs(prev => [...prev, { text: msg.output, level: msg.exitCode === 0 ? 'default' : 'error' }]);
-      }
-    };
-    return () => ws.close();
-  }, [token]);
-
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (input.trim()) {
-      sendCmd(input.trim());
-      setInput('');
-    }
+    if (!input.trim()) return;
+    const nextCommand = input;
+    setInput('');
+    await runCommand(nextCommand);
   };
 
   return (
-    <div>
-      <h2 style={{ marginBottom: '20px', color: 'var(--accent-cyan)' }}>Remote Terminal</h2>
-      <div className="glass-panel">
-        <div style={{ background: '#05070a', border: '1px solid var(--panel-border)', borderRadius: '8px', padding: '16px', fontFamily: 'var(--font-mono)', fontSize: '0.9rem', height: '400px', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+    <div className="page-shell">
+      <section className="hero-panel compact">
+        <div>
+          <p className="eyebrow">Operations</p>
+          <h1 className="page-title">Remote Terminal</h1>
+          <p className="page-copy">
+            Execute diagnostics and server maintenance through the installed agent without opening a second control surface.
+          </p>
+        </div>
+        <div className="hero-status-stack">
+          <div className={`status-pill ${user?.agentStatus === 'CONNECTED' ? 'connected' : 'disconnected'}`}>
+            {user?.agentStatus === 'CONNECTED' ? 'Agent Ready' : 'Awaiting Agent'}
+          </div>
+          <div className="meta-chip">Socket {socketState}</div>
+          <div className="meta-chip">Agent {agentStatus}</div>
+        </div>
+      </section>
+
+      <section className="glass-panel elevated-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Session</p>
+            <h3>Live Command Console</h3>
+          </div>
+          <div className="meta-chip">{isRunning ? 'Command in progress' : 'Idle'}</div>
+        </div>
+
+        <div className="terminal-log terminal-large">
           {logs.map((log, idx) => (
-            <div key={idx} style={{ marginBottom: '4px', lineHeight: '1.4', color: log.level === 'info' ? 'var(--accent-cyan)' : log.level === 'error' ? 'var(--danger-red)' : 'var(--text-main)', whiteSpace: 'pre-wrap' }}>
+            <div key={`${idx}-${log.text}`} className={`log-line ${log.level}`}>
               {log.text}
             </div>
           ))}
           <div ref={logEndRef} />
         </div>
-        <form onSubmit={handleSubmit} style={{ display: 'flex', marginTop: '16px', borderTop: '1px solid var(--panel-border)', paddingTop: '16px', alignItems: 'center' }}>
-          <span style={{ color: 'var(--success-green)', marginRight: '10px', fontFamily: 'var(--font-mono)' }}>root@server:~$</span>
-          <input 
-            type="text" 
-            value={input} 
-            onChange={(e) => setInput(e.target.value)} 
-            style={{ flex: 1, background: 'transparent', border: 'none', color: 'var(--text-main)', outline: 'none', boxShadow: 'none', padding: 0 }} 
-            autoFocus 
-            autoComplete="off" 
+
+        <form onSubmit={handleSubmit} className="terminal-form">
+          <label className="terminal-prompt">root@server:~$</label>
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            className="terminal-input"
+            autoComplete="off"
+            disabled={isRunning}
+            placeholder="Enter a Linux command"
           />
-          <button type="submit" style={{ padding: '6px 16px', marginLeft: '10px' }}>EXEC</button>
+          <button type="submit" disabled={isRunning || user?.agentStatus !== 'CONNECTED'}>
+            {isRunning ? 'Running…' : 'Execute'}
+          </button>
         </form>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '20px' }}>
-          {['uptime', 'free -h', 'df -h', 'ss -ant | wc -l', 'nft list ruleset', 'tail -n 20 /var/log/syslog'].map(cmd => (
-            <button key={cmd} onClick={() => sendCmd(cmd)} style={{ fontSize: '0.75rem', padding: '6px 12px' }}>{cmd}</button>
+
+        <div className="action-grid">
+          {quickActions.map(cmd => (
+            <button
+              key={cmd}
+              type="button"
+              className="secondary-button"
+              onClick={() => runCommand(cmd)}
+              disabled={isRunning || user?.agentStatus !== 'CONNECTED'}
+            >
+              {cmd}
+            </button>
           ))}
-          <button onClick={() => setLogs([])} style={{ fontSize: '0.75rem', padding: '6px 12px', background: 'transparent', borderColor: 'var(--text-muted)', color: 'var(--text-muted)' }}>Clear</button>
         </div>
-      </div>
+      </section>
     </div>
   );
 }
