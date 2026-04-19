@@ -41,7 +41,8 @@ const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 3001;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY; // Needed for admin operations
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY; // Needed for admin operations
+const ADMIN_FEATURES_ENABLED = Boolean(SUPABASE_SERVICE_KEY);
 
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   console.error("\x1b[31m[x] Error: Missing SUPABASE_URL or SUPABASE_ANON_KEY in .env\x1b[0m");
@@ -51,7 +52,7 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
 // Global Supabase Client (Anon privileges)
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // Admin Client (Bypasses RLS, careful!)
-const supabaseAdmin = SUPABASE_SERVICE_KEY ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY) : supabase;
+const supabaseAdmin = ADMIN_FEATURES_ENABLED ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY) : supabase;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'frontend', 'dist')));
@@ -92,6 +93,15 @@ const authMiddleware = async (req, res, next) => {
 
 const adminMiddleware = (req, res, next) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  next();
+};
+
+const privilegedSupabaseMiddleware = (req, res, next) => {
+  if (!ADMIN_FEATURES_ENABLED) {
+    return res.status(503).json({
+      error: 'Admin features require SUPABASE_SERVICE_KEY or SUPABASE_SERVICE_ROLE_KEY in the server environment.'
+    });
+  }
   next();
 };
 
@@ -186,20 +196,20 @@ app.post('/api/me/regenerate-key', authMiddleware, async (req, res) => {
   res.json({ apiKey: newKey });
 });
 
-app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
+app.get('/api/admin/users', authMiddleware, adminMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
   const { data, error } = await supabaseAdmin.from('user_profiles').select('*');
   if (error) return res.status(500).json({ error: error.message });
   res.json(data || []);
 });
 
-app.post('/api/admin/approve', authMiddleware, adminMiddleware, async (req, res) => {
+app.post('/api/admin/approve', authMiddleware, adminMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
   const { id } = req.body;
   const { error } = await supabaseAdmin.from('user_profiles').update({ status: 'approved' }).eq('id', id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true });
 });
 
-app.post('/api/admin/reject', authMiddleware, adminMiddleware, async (req, res) => {
+app.post('/api/admin/reject', authMiddleware, adminMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
   const { id } = req.body;
   const { error } = await supabaseAdmin.from('user_profiles').update({ status: 'rejected' }).eq('id', id);
   if (error) return res.status(500).json({ error: error.message });
@@ -494,7 +504,7 @@ app.post('/api/command', authMiddleware, (req, res) => {
 });
 
 // GRE Tunnel Endpoints
-app.post('/api/agent/tunnel/create', agentAuthMiddleware, async (req, res) => {
+app.post('/api/agent/tunnel/create', agentAuthMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
   const { agentId, clientIp } = req.body;
   
   if (!clientIp) return res.status(400).json({ error: 'Missing clientIp' });
@@ -521,7 +531,7 @@ app.post('/api/agent/tunnel/create', agentAuthMiddleware, async (req, res) => {
   }
 });
 
-app.delete('/api/agent/tunnel/remove', authMiddleware, async (req, res) => {
+app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
   const { agent_id } = req.user;
   
   try {
@@ -540,7 +550,7 @@ app.delete('/api/agent/tunnel/remove', authMiddleware, async (req, res) => {
   }
 });
 
-app.get('/api/agent/tunnel/status', authMiddleware, async (req, res) => {
+app.get('/api/agent/tunnel/status', authMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
   const { agent_id } = req.user;
   try {
     const { data } = await supabaseAdmin.from('user_profiles').select('tunnel_status').eq('agent_id', agent_id).single();
@@ -640,10 +650,10 @@ server.listen(PORT, () => {
     console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mDatabase:\x1b[0m      \x1b[31mDisconnected\x1b[0m`);
   }
   
-  if (SUPABASE_SERVICE_KEY) {
-    console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mAdmin Status:\x1b[0m  \x1b[32mActive (Service Key present)\x1b[0m`);
+  if (ADMIN_FEATURES_ENABLED) {
+    console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mAdmin Status:\x1b[0m  \x1b[32mActive (Service key present)\x1b[0m`);
   } else {
-    console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mAdmin Status:\x1b[0m  \x1b[33mInactive (Running in Anon mode)\x1b[0m`);
+    console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mAdmin Status:\x1b[0m  \x1b[33mInactive (Missing SUPABASE_SERVICE_KEY / SUPABASE_SERVICE_ROLE_KEY)\x1b[0m`);
   }
 
   console.log('\n\x1b[1m\x1b[33m[!] Waiting for connections...\x1b[0m\n');

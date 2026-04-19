@@ -7,7 +7,7 @@ SBS is a full-stack web application designed for DDoS protection management. Use
 - **Auth**: Supabase Auth
 - **Real-time**: WebSocket
 - **Database**: Supabase PostgreSQL
-- **Frontend**: Single HTML file with Vanilla JS + Chart.js
+- **Frontend**: React + Vite + Chart.js
 
 ## Quick Start (Local)
 
@@ -19,10 +19,12 @@ SBS is a full-stack web application designed for DDoS protection management. Use
 2. **Environment Variables:**
    Create a `.env` file in the root directory:
    ```env
-   PORT=3000
+   PORT=3001
    SUPABASE_URL="your-supabase-url"
    SUPABASE_ANON_KEY="your-supabase-anon-key"
+   SUPABASE_SERVICE_KEY="your-supabase-service-role-key"
    ```
+   `SUPABASE_SERVICE_KEY` is required for admin approval, admin user listing, and tunnel/profile updates. The server also accepts `SUPABASE_SERVICE_ROLE_KEY` as an alias.
 
 3. **Database Setup:**
    Execute the contents of `supabase_setup.sql` in your Supabase project's SQL Editor to create the required tables, triggers, and security policies.
@@ -33,7 +35,7 @@ SBS is a full-stack web application designed for DDoS protection management. Use
    ```
 
 5. **Login:**
-   Open `http://localhost:3000` in your browser and register a new account.
+   Open `http://localhost:3001` in your browser and register a new account.
 
 ## Deployment Guide (Production)
 
@@ -62,6 +64,14 @@ pm2 save
 pm2 startup
 ```
 
+Recommended `.env`:
+```env
+PORT=3001
+SUPABASE_URL="your-supabase-url"
+SUPABASE_ANON_KEY="your-supabase-anon-key"
+SUPABASE_SERVICE_KEY="your-supabase-service-role-key"
+```
+
 ### 4. Nginx Reverse Proxy Config (with WebSocket Support)
 Create an Nginx configuration file (`/etc/nginx/sites-available/sbs`):
 
@@ -71,7 +81,7 @@ server {
     server_name yourdomain.com;
 
     location / {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://localhost:3001;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -104,7 +114,7 @@ sudo certbot --nginx -d yourdomain.com
 ```bash
 curl -X POST http://localhost:3000/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "admin123"}'
+  -d '{"username": "admin@example.com", "password": "admin123"}'
 # Returns: {"token": "eyJ...", "user": {...}}
 ```
 
@@ -122,5 +132,6 @@ curl -X POST http://localhost:3000/api/command \
 
 - **Agent shows "NO AGENT"**: Ensure the agent is running on the target server. Check logs using `journalctl -u sbs-agent -f`.
 - **WebSocket disconnects frequently**: Ensure your Nginx configuration includes the `proxy_read_timeout` and `Upgrade` headers.
-- **Supabase Authentication Issues**: Make sure the `supabase_setup.sql` script was run successfully and `.env` has the correct `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
+- **Admin shows inactive / approval fails**: Make sure `.env` includes `SUPABASE_SERVICE_KEY` or `SUPABASE_SERVICE_ROLE_KEY`, then restart PM2.
+- **Supabase Authentication Issues**: Make sure the `supabase_setup.sql` script was run successfully and `.env` has the correct `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and service-role key.
 - **Agent fails to download**: Verify that you are logged in and your session is active.
