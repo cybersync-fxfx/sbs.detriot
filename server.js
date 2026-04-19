@@ -60,6 +60,12 @@ app.use(express.static(path.join(__dirname, 'frontend', 'dist')));
 let db = { agents: {} }; // agents store runtime state
 let commandQueue = {}; // { agentId: [{ id, cmd }] }
 
+const normalizeIp = (value) => {
+  if (!value) return '';
+  const candidate = Array.isArray(value) ? value[0] : String(value).split(',')[0].trim();
+  return candidate.replace(/^::ffff:/, '');
+};
+
 // Middleware
 const authMiddleware = async (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
@@ -263,7 +269,8 @@ const https = require('https');
 const config = {
   server: process.env.SBS_SERVER,
   agentId: process.env.SBS_AGENT_ID,
-  apiKey: process.env.SBS_API_KEY
+  apiKey: process.env.SBS_API_KEY,
+  enableTunnel: process.env.SBS_ENABLE_TUNNEL === '1'
 };
 
 const reqModule = config.server.startsWith('https') ? https : http;
@@ -287,8 +294,7 @@ function makeRequest(path, method, data, callback) {
 function registerTunnel() {
   makeRequest('/api/agent/tunnel/create', 'POST', {
     agentId: config.agentId,
-    apiKey: config.apiKey,
-    clientIp: fs.readFileSync('/tmp/client_ip.txt', 'utf-8').trim()
+    apiKey: config.apiKey
   }, (err, res) => {
     if (!err) console.log('[SBS] Tunnel registered with guard');
   });
@@ -303,7 +309,7 @@ function register() {
     os: 'Ubuntu',
     arch: process.arch
   }, (err) => {
-    if (!err) registerTunnel();
+    if (!err && config.enableTunnel) registerTunnel();
   });
 }
 
@@ -358,6 +364,7 @@ cat << EOF > /opt/sbs-agent/.env
 SBS_SERVER=${serverUrl}
 SBS_AGENT_ID=${req.user.agent_id}
 SBS_API_KEY=${req.user.api_key}
+SBS_ENABLE_TUNNEL=0
 EOF
 
 mkdir -p /var/log/sbs
@@ -375,7 +382,9 @@ table inet sbs_filter {
 
   chain input {
     type filter hook input priority 0; policy accept;
-    
+    ct state invalid drop
+    ct state established,related accept
+    iif lo accept
     ip saddr @blacklist drop
     
     tcp flags syn limit rate 1000/second accept
@@ -392,36 +401,8 @@ EOF
 systemctl enable nftables
 systemctl restart nftables
 
-# Get IPs for Tunneling
-CLIENT_IP=\$(hostname -I | awk '{print \$1}')
-echo "\$CLIENT_IP" > /tmp/client_ip.txt
-GUARD_IP=\$(curl -s ifconfig.me)
-
-echo "[SBS] Setting up GRE tunnel to Detroit SBS guard..."
-ip tunnel add gre_detroit mode gre \\
-  remote \${GUARD_IP} \\
-  local \${CLIENT_IP} \\
-  ttl 255 2>/dev/null || true
-ip link set gre_detroit up
-
-ip route add default via \${GUARD_IP} dev gre_detroit metric 100 2>/dev/null || true
-echo "[SBS] GRE tunnel established"
-
-echo "[SBS] Locking server — only accepting traffic from guard..."
-nft add rule inet sbs_filter input \\
-  ip saddr != \${GUARD_IP} \\
-  ip saddr != 127.0.0.1 \\
-  drop
-echo "[SBS] Direct access blocked — traffic routing through Detroit SBS"
-
-cat > /etc/network/if-up.d/detroit-tunnel << TUNNEL
-#!/bin/bash
-CLIENT_IP=\\\$(hostname -I | awk '{print \\\$1}')
-ip tunnel add gre_detroit mode gre remote \${GUARD_IP} local \\\$CLIENT_IP ttl 255 2>/dev/null || true
-ip link set gre_detroit up 2>/dev/null || true
-ip route add default via \${GUARD_IP} dev gre_detroit metric 100 2>/dev/null || true
-TUNNEL
-chmod +x /etc/network/if-up.d/detroit-tunnel
+echo "[SBS] Tunnel bootstrap disabled in this installer build."
+echo "[SBS] Agent connectivity, stats, terminal, and dashboard features remain enabled."
 
 cat << 'EOF' > /etc/systemd/system/sbs-agent.service
 [Unit]
@@ -457,9 +438,10 @@ echo "Check your dashboard for connection status."
 // Agent endpoints
 app.post('/api/agent/register', agentAuthMiddleware, (req, res) => {
   const { agentId } = req.user;
+  const requestIp = normalizeIp(req.headers['x-forwarded-for'] || req.socket.remoteAddress);
   db.agents[agentId] = {
     hostname: req.body.hostname,
-    ip: req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+    ip: requestIp,
     os: req.body.os,
     arch: req.body.arch,
     lastSeen: Date.now()
@@ -505,7 +487,8 @@ app.post('/api/command', authMiddleware, (req, res) => {
 
 // GRE Tunnel Endpoints
 app.post('/api/agent/tunnel/create', agentAuthMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
-  const { agentId, clientIp } = req.body;
+  const agentId = req.body.agentId || req.user.agentId;
+  const clientIp = normalizeIp(req.body.clientIp || req.headers['x-forwarded-for'] || req.socket.remoteAddress);
   
   if (!clientIp) return res.status(400).json({ error: 'Missing clientIp' });
 
