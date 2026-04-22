@@ -3,13 +3,13 @@ import { useAgentCommands } from '../hooks/useAgentCommands';
 
 const inspectionActions = [
   {
-    title: 'Full nftables ruleset',
-    description: 'Inspect every active nftables table, chain, and set on the protected server.',
+    title: 'Full Firewall Ruleset',
+    description: 'Inspect every active firewall table, chain, and rule set on the protected server.',
     command: 'nft list ruleset'
   },
   {
     title: 'Firewall service health',
-    description: 'Check whether nftables is enabled and currently running.',
+    description: 'Check whether the firewall service is enabled and currently running.',
     command: 'systemctl status nftables --no-pager'
   },
   {
@@ -19,7 +19,7 @@ const inspectionActions = [
   },
   {
     title: 'Reload firewall service',
-    description: 'Restart nftables cleanly and return the service status.',
+    description: 'Restart the firewall service cleanly and return the status.',
     command: 'systemctl restart nftables && systemctl status nftables --no-pager'
   }
 ];
@@ -56,7 +56,7 @@ export default function Firewall({ token, user }) {
           <p className="eyebrow">Security</p>
           <h1 className="page-title">Firewall Control</h1>
           <p className="page-copy">
-            Use audited command presets to inspect the live nftables state and verify protection services without relying on placeholder controls.
+            Use audited command presets to inspect the live firewall state and verify protection services on your server.
           </p>
         </div>
         <div className="hero-status-stack">

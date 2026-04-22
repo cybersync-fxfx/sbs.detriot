@@ -44,7 +44,7 @@ export default function Install({ token, user }) {
           <p className="eyebrow">Deployment</p>
           <h1 className="page-title">Install Agent</h1>
           <p className="page-copy">
-            Generate a per-user installer, ship it to the target Linux server, and bring that server into the dashboard with one command.
+            Generate a dedicated installer for your server, upload it, and bring that server into the dashboard with a single command.
           </p>
         </div>
         <div className="hero-status-stack">
@@ -84,7 +84,7 @@ export default function Install({ token, user }) {
             </label>
 
             <div className="callout-inline warning">
-              Download a fresh installer whenever you change the API key or panel domain. This build connects the agent to the dashboard first; GRE routing stays deferred.
+              Download a fresh installer whenever you update credentials or the panel address. The agent connects to the dashboard immediately upon install.
             </div>
 
             {feedback ? (

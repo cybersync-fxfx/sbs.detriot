@@ -23,7 +23,7 @@ export default function Layout({ user, setToken }) {
     { path: '/', name: 'Dashboard', icon: <Activity size={18} />, caption: 'Live telemetry and connection health' },
     { path: '/terminal', name: 'Terminal', icon: <Terminal size={18} />, caption: 'Run remote commands through the agent' },
     { section: 'Security' },
-    { path: '/firewall', name: 'Firewall', icon: <Shield size={18} />, caption: 'Inspect active nftables rules and service state' },
+    { path: '/firewall', name: 'Firewall', icon: <Shield size={18} />, caption: 'Inspect active firewall rules and service state' },
     { path: '/blocklist', name: 'Block List', icon: <ListX size={18} />, caption: 'Ban, review, and remove blocked IPs' },
     { section: 'Setup' },
     { path: '/install', name: 'Install Agent', icon: <Download size={18} />, caption: 'Generate the installer and deploy to a server' },

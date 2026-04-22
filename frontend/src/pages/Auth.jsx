@@ -180,7 +180,7 @@ export default function Auth({ setToken }) {
                 </div>
                 <h3 style={{ fontSize: '1.4rem', marginBottom: '15px' }}>Instant Mitigation</h3>
                 <p style={{ color: 'var(--text-muted)', lineHeight: '1.6' }}>
-                  Detects Layer 4 and Layer 7 anomalies instantly. Automatically updates nftables rules to block malicious IPs before they impact your services.
+                  Detects network anomalies instantly. Automatically blocks malicious IPs before they impact your services — all within milliseconds.
                 </p>
               </div>
 
@@ -191,7 +191,7 @@ export default function Auth({ setToken }) {
                 </div>
                 <h3 style={{ fontSize: '1.4rem', marginBottom: '15px' }}>Real-Time Telemetry</h3>
                 <p style={{ color: 'var(--text-muted)', lineHeight: '1.6' }}>
-                  Monitor live traffic rates, active connections, and system resource usage directly from your browser via low-latency WebSockets.
+                  Monitor live traffic rates, active connections, and system resource usage directly from your browser with sub-second updates.
                 </p>
               </div>
 
@@ -223,7 +223,7 @@ export default function Auth({ setToken }) {
                   </div>
                   <div>
                     <h4 style={{ fontSize: '1.2rem', marginBottom: '10px' }}>The SBS Agent</h4>
-                    <p style={{ color: 'var(--text-muted)', lineHeight: '1.6' }}>A lightweight Node.js daemon running on your host, hooked directly into the kernel's nftables to manage packet filtering with near-zero overhead.</p>
+                    <p style={{ color: 'var(--text-muted)', lineHeight: '1.6' }}>A lightweight protection agent installed on your server, filtering malicious traffic in real time with near-zero overhead.</p>
                   </div>
                 </div>
 
@@ -243,7 +243,7 @@ export default function Auth({ setToken }) {
                   </div>
                   <div>
                     <h4 style={{ fontSize: '1.2rem', marginBottom: '10px' }}>Zero-Trust Auth</h4>
-                    <p style={{ color: 'var(--text-muted)', lineHeight: '1.6' }}>All communication between the agent and dashboard is secured via JWT and TLS. No open management ports are exposed to the public internet.</p>
+                    <p style={{ color: 'var(--text-muted)', lineHeight: '1.6' }}>All communication between the agent and dashboard is encrypted end-to-end. No open management ports are exposed to the public internet.</p>
                   </div>
                 </div>
               </div>

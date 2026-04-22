@@ -133,9 +133,9 @@ export default function ApiKeys({ token, user, setUser }) {
 
           <pre className="command-output">
 {`curl -X POST ${panelOrigin}/api/command \\
-  -H "Authorization: Bearer YOUR_JWT_TOKEN" \\
+  -H "Authorization: Bearer YOUR_TOKEN" \\
   -H "Content-Type: application/json" \\
-  -d '{"cmd":"nft list ruleset"}'`}
+  -d '{"cmd":"uptime"}'`}
           </pre>
         </article>
       </section>

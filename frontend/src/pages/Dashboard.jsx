@@ -396,7 +396,7 @@ export default function Dashboard({ user, token }) {
                 {isConnected ? 'Ready' : 'Waiting for agent'}
               </span>
             </div>
-            <div className="fact-row"><span>Firewall (nftables)</span>
+            <div className="fact-row"><span>Firewall Status</span>
               <span className={`fact-value ${isConnected ? '' : 'danger'}`}>
                 {isConnected ? 'Active' : 'Unknown'}
               </span>

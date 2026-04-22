@@ -80,7 +80,7 @@ export default function Blocklist({ token, user }) {
 
   const summaryLabel = useMemo(() => {
     if (!ips.length) return 'No blocked IPs reported by the agent';
-    return `${ips.length} blocked ${ips.length === 1 ? 'IP' : 'IPs'} reported by nftables`;
+    return `${ips.length} blocked ${ips.length === 1 ? 'IP' : 'IPs'} active on the firewall`;
   }, [ips]);
 
   return (
@@ -90,7 +90,7 @@ export default function Blocklist({ token, user }) {
           <p className="eyebrow">Security</p>
           <h1 className="page-title">Block List</h1>
           <p className="page-copy">
-            Push real blocklist changes to the protected server and keep the visible list in sync with the live nftables set.
+            Push real blocklist changes to the protected server and keep the visible list in sync with the live firewall rules.
           </p>
         </div>
         <div className="hero-status-stack">
@@ -139,7 +139,7 @@ export default function Blocklist({ token, user }) {
           </div>
 
           {ips.length === 0 ? (
-            <div className="empty-state">No blocked IPv4 addresses are currently listed by the agent firewall.</div>
+            <div className="empty-state">No blocked IPv4 addresses are currently listed by the server firewall.</div>
           ) : (
             <div className="table-shell">
               <table>
@@ -176,11 +176,11 @@ export default function Blocklist({ token, user }) {
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Raw Response</p>
-            <h3>nftables Output</h3>
+            <h3>Firewall Output</h3>
           </div>
         </div>
         <div className="terminal-log medium">
-          {rawOutput ? <pre className="command-output">{rawOutput}</pre> : <div className="empty-state">Run a refresh to capture the current nftables blacklist output.</div>}
+          {rawOutput ? <pre className="command-output">{rawOutput}</pre> : <div className="empty-state">Run a refresh to capture the current firewall blacklist output.</div>}
         </div>
       </section>
     </div>
