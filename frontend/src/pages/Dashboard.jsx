@@ -209,7 +209,10 @@ export default function Dashboard({ user }) {
               options={{
                 responsive: true,
                 maintainAspectRatio: false,
-                animation: false,
+                animation: {
+                  duration: 800,
+                  easing: 'linear'
+                },
                 plugins: {
                   legend: {
                     labels: {

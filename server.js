@@ -406,8 +406,8 @@ function pollCommands() {
 
 register();
 setInterval(register, 15000);
-setInterval(sendStats, 5000);
-setInterval(pollCommands, 3000);
+setInterval(sendStats, 1000);
+setInterval(pollCommands, 1000);
 EOF
 
 cat << EOF > /opt/sbs-agent/.env
