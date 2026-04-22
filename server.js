@@ -378,32 +378,85 @@ function register() {
   });
 }
 
-function sendStats() {
-  exec("ss -ant | wc -l; ss -ant | grep ESTAB | wc -l; ss -ant | grep SYN-RECV | wc -l; nft list set inet sbs_filter blacklist | grep -c '\\.' || echo 0; free | grep Mem | awk '{print $3/$2 * 100}'; cat /proc/net/dev | grep eth0 || echo 'eth0: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'; cat /proc/uptime | awk '{print $1}'; tail -n 10 /var/log/sbs/attacks.log 2>/dev/null || echo ''", (err, stdout) => {
-    if (err || !stdout) return;
-    const parts = stdout.split('\\n');
-
-    const currentCpu = getCpuUsage();
-    const totalDiff = currentCpu.total - lastCpu.total;
-    const activeDiff = currentCpu.active - lastCpu.active;
-    const cpuPercent = totalDiff === 0 ? 0 : (activeDiff / totalDiff) * 100;
-    lastCpu = currentCpu;
-
-    makeRequest('/api/agent/stats', 'POST', {
-      agentId: config.agentId,
-      apiKey: config.apiKey,
-      connections: parseInt(parts[0]) || 0,
-      established: parseInt(parts[1]) || 0,
-      synRate: parseInt(parts[2]) || 0,
-      bannedIPs: parseInt(parts[3]) || 0,
-      cpuPercent: parseFloat(cpuPercent.toFixed(1)) || 0,
-      memPercent: parseFloat(parts[4]) || 0,
-      pps: 0,
-      inMbps: 0,
-      outMbps: 0,
-      uptime: parseFloat(parts[7]) || 0,
-      log: parts.slice(8).join('\\n')
+// Read /proc/net/dev and return {rx, tx} bytes for the primary interface
+function readNetBytes(cb) {
+  const { exec } = require('child_process');
+  exec("cat /proc/net/dev | awk 'NR>2 && !/lo/ {print $1,$2,$10; exit}'", (err, out) => {
+    if (err || !out.trim()) return cb(null, { rx: 0, tx: 0, iface: 'unknown' });
+    const parts = out.trim().split(/\s+/);
+    cb(null, {
+      iface: (parts[0] || '').replace(':', ''),
+      rx: parseInt(parts[1]) || 0,
+      tx: parseInt(parts[2]) || 0
     });
+  });
+}
+
+let lastNetSample = { rx: 0, tx: 0, ts: Date.now() };
+
+function sendStats() {
+  // Step 1: snapshot network bytes NOW before running the bash block
+  readNetBytes((_, netNow) => {
+    const elapsed = (Date.now() - lastNetSample.ts) / 1000 || 1;
+    const rxDiff  = Math.max(0, netNow.rx - lastNetSample.rx);
+    const txDiff  = Math.max(0, netNow.tx - lastNetSample.tx);
+    const inMbps  = parseFloat(((rxDiff * 8) / elapsed / 1_000_000).toFixed(3));
+    const outMbps = parseFloat(((txDiff * 8) / elapsed / 1_000_000).toFixed(3));
+    lastNetSample = { rx: netNow.rx, tx: netNow.tx, ts: Date.now() };
+
+    // Step 2: collect system stats + SSH log + attack log
+    exec(
+      "ss -ant | wc -l; " +
+      "ss -ant | grep ESTAB | wc -l; " +
+      "ss -ant | grep SYN-RECV | wc -l; " +
+      "nft list set inet sbs_filter blacklist | grep -c '\\.' || echo 0; " +
+      "free | grep Mem | awk '{print $3/$2 * 100}'; " +
+      "cat /proc/uptime | awk '{print $1}'; " +
+      // SSH events — accepted / failed / invalid from auth.log
+      "grep -E 'Accepted|Failed|Invalid|Disconnected' /var/log/auth.log 2>/dev/null | tail -n 20 || " +
+      "grep -E 'Accepted|Failed|Invalid|Disconnected' /var/log/secure 2>/dev/null | tail -n 20 || echo ''; " +
+      // Attack log
+      "echo '---ATTACKS---'; " +
+      "tail -n 10 /var/log/sbs/attacks.log 2>/dev/null || echo ''",
+      (err, stdout) => {
+        if (err || !stdout) return;
+        const raw   = stdout;
+        const lines = raw.split('\\n');
+
+        const currentCpu = getCpuUsage();
+        const totalDiff  = currentCpu.total - lastCpu.total;
+        const activeDiff = currentCpu.active - lastCpu.active;
+        const cpuPercent = totalDiff === 0 ? 0 : (activeDiff / totalDiff) * 100;
+        lastCpu = currentCpu;
+
+        // Split log sections
+        const attackSep   = lines.findIndex(l => l.includes('---ATTACKS---'));
+        const sshLines    = lines.slice(6, attackSep >= 0 ? attackSep : lines.length);
+        const attackLines = attackSep >= 0 ? lines.slice(attackSep + 1) : [];
+
+        const logOutput = [
+          ...sshLines.filter(l => l.trim()).map(l => '[SSH] ' + l.trim()),
+          ...attackLines.filter(l => l.trim()).map(l => '[FW]  ' + l.trim()),
+        ].join('\\n');
+
+        makeRequest('/api/agent/stats', 'POST', {
+          agentId:    config.agentId,
+          apiKey:     config.apiKey,
+          connections: parseInt(lines[0]) || 0,
+          established: parseInt(lines[1]) || 0,
+          synRate:     parseInt(lines[2]) || 0,
+          bannedIPs:   parseInt(lines[3]) || 0,
+          cpuPercent:  parseFloat(cpuPercent.toFixed(1)) || 0,
+          memPercent:  parseFloat(lines[4]) || 0,
+          inMbps,
+          outMbps,
+          pps:   0,
+          uptime: parseFloat(lines[5]) || 0,
+          log:   logOutput,
+          iface: netNow.iface,
+        });
+      }
+    );
   });
 }
 

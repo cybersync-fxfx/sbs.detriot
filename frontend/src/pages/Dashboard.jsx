@@ -14,7 +14,8 @@ export default function Dashboard({ user, token }) {
   const [stats, setStats] = useState({
     connections: 0, bannedIPs: 0, cpuPercent: 0,
     memPercent: 0, synRate: 0, pps: 0, uptime: 0,
-    hostname: '-', ip: '-', os: '-',
+    inMbps: 0, outMbps: 0,
+    hostname: '-', ip: '-', os: '-', iface: '-',
   });
   const [tunnelStatus,    setTunnelStatus]    = useState('loading');
   const [logs,            setLogs]            = useState([]);
@@ -27,25 +28,26 @@ export default function Dashboard({ user, token }) {
   const retryCount  = useRef(0);
   const unmounted   = useRef(false);
 
-  const [chartData, setChartData] = useState({
+  const emptyChart = (labels) => ({
     labels: Array(CHART_POINTS).fill(''),
-    datasets: [
-      {
-        label: 'CPU %',
-        borderColor: '#00ff41',
-        backgroundColor: 'rgba(0,255,65,0.08)',
-        borderWidth: 1.5, tension: 0.4, fill: true,
-        data: Array(CHART_POINTS).fill(0), pointRadius: 0,
-      },
-      {
-        label: 'MEM %',
-        borderColor: '#ff003c',
-        backgroundColor: 'rgba(255,0,60,0.08)',
-        borderWidth: 1.5, tension: 0.4, fill: true,
-        data: Array(CHART_POINTS).fill(0), pointRadius: 0,
-      },
-    ],
+    datasets: labels.map(l => ({
+      label: l.label,
+      borderColor: l.color,
+      backgroundColor: l.bg,
+      borderWidth: 1.5, tension: 0.4, fill: true,
+      data: Array(CHART_POINTS).fill(0), pointRadius: 0,
+    })),
   });
+
+  const [cpuChart, setCpuChart] = useState(() => emptyChart([
+    { label: 'CPU %',  color: '#00ff41', bg: 'rgba(0,255,65,0.08)'  },
+    { label: 'MEM %',  color: '#ff003c', bg: 'rgba(255,0,60,0.08)'  },
+  ]));
+
+  const [netChart, setNetChart] = useState(() => emptyChart([
+    { label: 'In (Mbps)',  color: '#00ff41', bg: 'rgba(0,255,65,0.08)'  },
+    { label: 'Out (Mbps)', color: '#ffaa00', bg: 'rgba(255,170,0,0.08)' },
+  ]));
 
   // ── Live "age of telemetry" ticker ───────────────────────────────────────
   useEffect(() => {
@@ -54,6 +56,7 @@ export default function Dashboard({ user, token }) {
     }, 1000);
     return () => clearInterval(id);
   }, [lastUpdateMs]);
+
 
   // ── Fetch tunnel status once ──────────────────────────────────────────────
   useEffect(() => {
@@ -110,36 +113,48 @@ export default function Dashboard({ user, token }) {
           synRate:     s.synRate      ?? prev.synRate,
           pps:         s.pps          ?? prev.pps,
           uptime:      s.uptime       ?? prev.uptime,
+          inMbps:      s.inMbps       ?? prev.inMbps,
+          outMbps:     s.outMbps      ?? prev.outMbps,
           hostname:    agent.hostname || prev.hostname,
           ip:          agent.ip       || prev.ip,
           os:          agent.os       || prev.os,
+          iface:       s.iface        || prev.iface,
         }));
 
-        setChartData(prev => {
+        // CPU/MEM chart
+        setCpuChart(prev => {
           const cpu = [...prev.datasets[0].data.slice(1), Number((s.cpuPercent || 0).toFixed(1))];
           const mem = [...prev.datasets[1].data.slice(1), Number((s.memPercent || 0).toFixed(1))];
-          return {
-            ...prev,
-            datasets: [
-              { ...prev.datasets[0], data: cpu },
-              { ...prev.datasets[1], data: mem },
-            ],
-          };
+          return { ...prev, datasets: [
+            { ...prev.datasets[0], data: cpu },
+            { ...prev.datasets[1], data: mem },
+          ]};
+        });
+
+        // Network chart
+        setNetChart(prev => {
+          const inD  = [...prev.datasets[0].data.slice(1), Number((s.inMbps  || 0).toFixed(3))];
+          const outD = [...prev.datasets[1].data.slice(1), Number((s.outMbps || 0).toFixed(3))];
+          return { ...prev, datasets: [
+            { ...prev.datasets[0], data: inD  },
+            { ...prev.datasets[1], data: outD },
+          ]};
         });
 
         if (s.log && s.log.trim()) {
-          const lines = s.log
-            .split('\n')
-            .filter(l => l.trim())
-            .map(l => {
-              let level = 'default';
-              if (/ban|drop|block/i.test(l)) level = 'error';
-              if (/accept|allow/i.test(l))   level = 'success';
-              return { text: `[${new Date().toLocaleTimeString()}] ${l}`, level };
-            });
-          setLogs(prev => [...lines, ...prev].slice(0, 100));
+          const lines = s.log.split('\n').filter(l => l.trim()).map(l => {
+            let level = 'default';
+            if (/\[FW\].*ban|drop|block/i.test(l))            level = 'error';
+            if (/\[FW\].*accept/i.test(l))                    level = 'success';
+            if (/\[SSH\].*Failed|Invalid|error/i.test(l))     level = 'error';
+            if (/\[SSH\].*Accepted/i.test(l))                 level = 'success';
+            if (/\[SSH\].*Disconnected/i.test(l))             level = 'info';
+            return { text: `[${new Date().toLocaleTimeString()}] ${l}`, level };
+          });
+          setLogs(prev => [...lines, ...prev].slice(0, 200));
         }
       }
+
     };
 
     ws.onerror = () => {
@@ -201,13 +216,36 @@ export default function Dashboard({ user, token }) {
     { label: 'Hostname',    value: stats.hostname },
     { label: 'IP Address',  value: stats.ip },
     { label: 'OS',          value: stats.os || '—' },
+    { label: 'Interface',   value: stats.iface },
     { label: 'Uptime',      value: uptimeLabel },
+    { label: 'In (Mbps)',   value: stats.inMbps.toFixed(3) },
+    { label: 'Out (Mbps)',  value: stats.outMbps.toFixed(3) },
     { label: 'SYN Rate',    value: stats.synRate },
     { label: 'Tunnel',      value: tunnelStatus === 'loading' ? '...' : tunnelStatus },
     { label: 'Guard Host',  value: window.location.hostname },
     { label: 'Telemetry',   value: telemetryLabel },
     { label: 'WebSocket',   value: wsLabel },
   ];
+
+  const chartOptions = (yLabel, maxY) => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 400, easing: 'linear' },
+    plugins: {
+      legend: {
+        labels: { color: '#00aa2b', font: { family: 'JetBrains Mono', size: 11 } }
+      }
+    },
+    scales: {
+      y: {
+        min: 0,
+        ...(maxY ? { max: maxY } : {}),
+        grid:  { color: 'rgba(0,255,65,0.08)' },
+        ticks: { color: '#00aa2b', font: { family: 'JetBrains Mono', size: 10 }, callback: v => `${v}${yLabel}` }
+      },
+      x: { grid: { display: false }, ticks: { display: false } }
+    }
+  });
 
   return (
     <div className="page-shell">
@@ -218,7 +256,7 @@ export default function Dashboard({ user, token }) {
           <p className="eyebrow">Operations Center</p>
           <h1 className="page-title">System Dashboard</h1>
           <p className="page-copy">
-            Live telemetry · firewall metrics · agent reachability
+            Live telemetry · network traffic · SSH events · firewall metrics
           </p>
         </div>
         <div className="hero-status-stack">
@@ -256,7 +294,7 @@ export default function Dashboard({ user, token }) {
         ))}
       </section>
 
-      {/* ── Chart + Facts ────────────────────────────────────────────── */}
+      {/* ── CPU/MEM Chart + Facts ─────────────────────────────────────── */}
       <section className="content-grid two-up">
         <article className="glass-panel elevated-panel">
           <div className="panel-heading">
@@ -267,27 +305,7 @@ export default function Dashboard({ user, token }) {
             <div className="meta-chip">{CHART_POINTS}s window</div>
           </div>
           <div className="chart-frame">
-            <Line
-              data={chartData}
-              options={{
-                responsive: true,
-                maintainAspectRatio: false,
-                animation: { duration: 400, easing: 'linear' },
-                plugins: {
-                  legend: {
-                    labels: { color: '#00aa2b', font: { family: 'JetBrains Mono', size: 11 } }
-                  }
-                },
-                scales: {
-                  y: {
-                    min: 0, max: 100,
-                    grid: { color: 'rgba(0,255,65,0.08)' },
-                    ticks: { color: '#00aa2b', font: { family: 'JetBrains Mono', size: 10 }, callback: v => `${v}%` }
-                  },
-                  x: { grid: { display: false }, ticks: { display: false } }
-                }
-              }}
-            />
+            <Line data={cpuChart} options={chartOptions('%', 100)} />
           </div>
         </article>
 
@@ -313,6 +331,27 @@ export default function Dashboard({ user, token }) {
             ))}
           </div>
         </article>
+      </section>
+
+      {/* ── Network Chart ────────────────────────────────────────────── */}
+      <section className="glass-panel elevated-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Network</p>
+            <h3>Live Bandwidth — {stats.iface !== '-' ? stats.iface : 'Primary Interface'}</h3>
+          </div>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div className="meta-chip" style={{ color: 'var(--accent-cyan)' }}>
+              ↓ {stats.inMbps.toFixed(3)} Mbps
+            </div>
+            <div className="meta-chip" style={{ color: 'var(--warn-amber)' }}>
+              ↑ {stats.outMbps.toFixed(3)} Mbps
+            </div>
+          </div>
+        </div>
+        <div className="chart-frame">
+          <Line data={netChart} options={chartOptions(' Mbps', undefined)} />
+        </div>
       </section>
 
       {/* ── Threat signals ───────────────────────────────────────────── */}
@@ -369,12 +408,16 @@ export default function Dashboard({ user, token }) {
       {/* ── Live Security Log ────────────────────────────────────────── */}
       <section className="glass-panel elevated-panel">
         <div className="panel-heading">
-          <div><p className="eyebrow">Events</p><h3>Live Security Log</h3></div>
-          <div className="meta-chip">{logs.length} lines</div>
+          <div><p className="eyebrow">Events</p><h3>Live Security Log — SSH + Firewall</h3></div>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <div className="meta-chip" style={{ color: 'var(--success-green)' }}>SSH</div>
+            <div className="meta-chip" style={{ color: 'var(--danger-red)' }}>FW</div>
+            <div className="meta-chip">{logs.length} lines</div>
+          </div>
         </div>
         <div className="terminal-log terminal-large">
           {logs.length === 0
-            ? <div className="empty-state">Waiting for agent log stream…</div>
+            ? <div className="empty-state">Waiting for agent log stream — SSH &amp; firewall events will appear here…</div>
             : logs.map((log, idx) => (
                 <div key={idx} className={`log-line ${log.level}`}>{log.text}</div>
               ))
@@ -385,3 +428,6 @@ export default function Dashboard({ user, token }) {
     </div>
   );
 }
+
+
+
