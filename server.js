@@ -283,6 +283,22 @@ const fs = require('fs');
 const { exec } = require('child_process');
 const http = require('http');
 const https = require('https');
+const os = require('os');
+
+function getCpuUsage() {
+  const cpus = os.cpus();
+  let user = 0, nice = 0, sys = 0, idle = 0, irq = 0;
+  for (let cpu in cpus) {
+    user += cpus[cpu].times.user;
+    nice += cpus[cpu].times.nice;
+    sys += cpus[cpu].times.sys;
+    idle += cpus[cpu].times.idle;
+    irq += cpus[cpu].times.irq;
+  }
+  return { total: user + nice + sys + idle + irq, active: user + nice + sys + irq };
+}
+
+let lastCpu = getCpuUsage();
 
 const config = {
   server: process.env.SBS_SERVER,
@@ -363,9 +379,16 @@ function register() {
 }
 
 function sendStats() {
-  exec("ss -ant | wc -l; ss -ant | grep ESTAB | wc -l; ss -ant | grep SYN-RECV | wc -l; nft list set inet sbs_filter blacklist | grep -c '\\.' || echo 0; top -bn1 | grep 'Cpu(s)' | awk '{print $2 + $4}'; free | grep Mem | awk '{print $3/$2 * 100}'; cat /proc/net/dev | grep eth0 || echo 'eth0: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'; cat /proc/uptime | awk '{print $1}'; tail -n 10 /var/log/sbs/attacks.log 2>/dev/null || echo ''", (err, stdout) => {
+  exec("ss -ant | wc -l; ss -ant | grep ESTAB | wc -l; ss -ant | grep SYN-RECV | wc -l; nft list set inet sbs_filter blacklist | grep -c '\\.' || echo 0; free | grep Mem | awk '{print $3/$2 * 100}'; cat /proc/net/dev | grep eth0 || echo 'eth0: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0'; cat /proc/uptime | awk '{print $1}'; tail -n 10 /var/log/sbs/attacks.log 2>/dev/null || echo ''", (err, stdout) => {
     if (err || !stdout) return;
     const parts = stdout.split('\\n');
+
+    const currentCpu = getCpuUsage();
+    const totalDiff = currentCpu.total - lastCpu.total;
+    const activeDiff = currentCpu.active - lastCpu.active;
+    const cpuPercent = totalDiff === 0 ? 0 : (activeDiff / totalDiff) * 100;
+    lastCpu = currentCpu;
+
     makeRequest('/api/agent/stats', 'POST', {
       agentId: config.agentId,
       apiKey: config.apiKey,
@@ -373,13 +396,13 @@ function sendStats() {
       established: parseInt(parts[1]) || 0,
       synRate: parseInt(parts[2]) || 0,
       bannedIPs: parseInt(parts[3]) || 0,
-      cpuPercent: parseFloat(parts[4]) || 0,
-      memPercent: parseFloat(parts[5]) || 0,
+      cpuPercent: parseFloat(cpuPercent.toFixed(1)) || 0,
+      memPercent: parseFloat(parts[4]) || 0,
       pps: 0,
       inMbps: 0,
       outMbps: 0,
-      uptime: parseFloat(parts[8]) || 0,
-      log: parts.slice(9).join('\\n')
+      uptime: parseFloat(parts[7]) || 0,
+      log: parts.slice(8).join('\\n')
     });
   });
 }
