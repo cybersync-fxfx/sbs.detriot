@@ -11,6 +11,7 @@ import Install from './pages/Install';
 import ApiKeys from './pages/ApiKeys';
 import Settings from './pages/Settings';
 
+// Main application router and state management
 function App() {
   const [token, setToken] = useState(localStorage.getItem('sbs_token'));
   const [user, setUser] = useState(null);
