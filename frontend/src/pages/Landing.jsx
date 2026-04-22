@@ -13,9 +13,9 @@ export default function Landing() {
       
       <main className="content-wrapper">
         <div className="brand-header">
-          {/* Shield button redirects to login */}
-          <div onClick={() => navigate('/login')} style={{ display: 'inline-block' }}>
-            <Shield size={48} className="brand-icon" />
+          {/* Logo redirects to login */}
+          <div onClick={() => navigate('/login')} style={{ display: 'inline-block', cursor: 'pointer' }}>
+            <img src="/logo.png" alt="SBS Logo" style={{ width: '72px', height: '72px', objectFit: 'contain' }} />
           </div>
           <h1 className="brand-title">SBS Platform</h1>
           <p className="brand-subtitle">Next-Generation Infrastructure Security</p>

@@ -40,13 +40,13 @@ export default function Dashboard({ user, token }) {
   });
 
   const [cpuChart, setCpuChart] = useState(() => emptyChart([
-    { label: 'CPU %',  color: '#00ff41', bg: 'rgba(0,255,65,0.08)'  },
-    { label: 'MEM %',  color: '#ff003c', bg: 'rgba(255,0,60,0.08)'  },
+    { label: 'CPU %',  color: '#3b82f6', bg: 'rgba(59,130,246,0.08)'  },
+    { label: 'MEM %',  color: '#ef4444', bg: 'rgba(239,68,68,0.08)'   },
   ]));
 
   const [netChart, setNetChart] = useState(() => emptyChart([
-    { label: 'In (Mbps)',  color: '#00ff41', bg: 'rgba(0,255,65,0.08)'  },
-    { label: 'Out (Mbps)', color: '#ffaa00', bg: 'rgba(255,170,0,0.08)' },
+    { label: 'In (Mbps)',  color: '#3b82f6', bg: 'rgba(59,130,246,0.08)'  },
+    { label: 'Out (Mbps)', color: '#60a5fa', bg: 'rgba(96,165,250,0.08)'  },
   ]));
 
   // ── Live "age of telemetry" ticker ───────────────────────────────────────
@@ -233,15 +233,15 @@ export default function Dashboard({ user, token }) {
     animation: { duration: 400, easing: 'linear' },
     plugins: {
       legend: {
-        labels: { color: '#00aa2b', font: { family: 'JetBrains Mono', size: 11 } }
+        labels: { color: '#64748b', font: { family: 'JetBrains Mono', size: 11 } }
       }
     },
     scales: {
       y: {
         min: 0,
         ...(maxY ? { max: maxY } : {}),
-        grid:  { color: 'rgba(0,255,65,0.08)' },
-        ticks: { color: '#00aa2b', font: { family: 'JetBrains Mono', size: 10 }, callback: v => `${v}${yLabel}` }
+        grid:  { color: 'rgba(59,130,246,0.08)' },
+        ticks: { color: '#64748b', font: { family: 'JetBrains Mono', size: 10 }, callback: v => `${v}${yLabel}` }
       },
       x: { grid: { display: false }, ticks: { display: false } }
     }

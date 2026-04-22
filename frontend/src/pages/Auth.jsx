@@ -62,7 +62,7 @@ export default function Auth({ setToken }) {
     <div style={{ minHeight: '100vh', background: 'var(--bg-dark)', color: 'var(--text-main)', fontFamily: 'var(--font-body)', overflowX: 'hidden' }}>
       {/* Dynamic Background Effects */}
       <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 0, pointerEvents: 'none' }}>
-        <div style={{ position: 'absolute', top: '-20%', left: '-10%', width: '50%', height: '50%', background: 'radial-gradient(circle, rgba(0, 240, 255, 0.05) 0%, transparent 70%)', filter: 'blur(60px)' }}></div>
+        <div style={{ position: 'absolute', top: '-20%', left: '-10%', width: '50%', height: '50%', background: 'radial-gradient(circle, rgba(59, 130, 246, 0.05) 0%, transparent 70%)', filter: 'blur(60px)' }}></div>
         <div style={{ position: 'absolute', bottom: '-20%', right: '-10%', width: '50%', height: '50%', background: 'radial-gradient(circle, rgba(59, 130, 246, 0.08) 0%, transparent 70%)', filter: 'blur(60px)' }}></div>
       </div>
 
@@ -77,7 +77,7 @@ export default function Auth({ setToken }) {
         display: 'flex', justifyContent: 'space-between', alignItems: 'center'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <Shield size={32} color="var(--accent-cyan)" style={{ filter: 'drop-shadow(0 0 10px rgba(0, 240, 255, 0.6))' }} />
+          <img src="/logo.png" alt="SBS" style={{ width: '36px', height: '36px', objectFit: 'contain' }} />
           <span style={{ fontFamily: 'var(--font-display)', fontSize: '1.5rem', fontWeight: '800', letterSpacing: '-0.5px' }}>
             SBS <span style={{ color: 'var(--text-muted)', fontWeight: '400' }}>Platform</span>
           </span>
@@ -96,7 +96,7 @@ export default function Auth({ setToken }) {
         {/* Hero Section */}
         <section style={{ padding: '80px 40px', maxWidth: '1400px', margin: '0 auto', display: 'flex', alignItems: 'center', minHeight: '80vh', gap: '60px', flexWrap: 'wrap' }}>
           <div style={{ flex: '1 1 500px' }}>
-            <div style={{ display: 'inline-block', padding: '6px 16px', background: 'rgba(0, 240, 255, 0.1)', border: '1px solid rgba(0, 240, 255, 0.2)', borderRadius: '20px', color: 'var(--accent-cyan)', fontSize: '0.85rem', fontWeight: '700', letterSpacing: '1px', marginBottom: '24px', textTransform: 'uppercase' }}>
+            <div style={{ display: 'inline-block', padding: '6px 16px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.2)', borderRadius: '20px', color: 'var(--accent-cyan)', fontSize: '0.85rem', fontWeight: '700', letterSpacing: '1px', marginBottom: '24px', textTransform: 'uppercase' }}>
               Next-Gen Infrastructure Security
             </div>
             <h1 style={{ fontSize: 'clamp(3rem, 5vw, 4.5rem)', lineHeight: '1.1', marginBottom: '24px', textShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
@@ -134,7 +134,7 @@ export default function Auth({ setToken }) {
               </h2>
 
               {error && <div style={{ color: 'var(--danger-red)', background: 'rgba(255, 51, 102, 0.1)', padding: '12px', borderRadius: '8px', marginBottom: '20px', fontSize: '0.9rem', border: '1px solid var(--danger-red)', display: 'flex', alignItems: 'center', gap: '10px' }}><Shield size={18}/> {error}</div>}
-              {msg && <div style={{ color: 'var(--success-green)', background: 'rgba(0, 255, 136, 0.1)', padding: '12px', borderRadius: '8px', marginBottom: '20px', fontSize: '0.9rem', border: '1px solid var(--success-green)' }}>{msg}</div>}
+              {msg && <div style={{ color: 'var(--success-green)', background: 'rgba(34, 197, 94, 0.1)', padding: '12px', borderRadius: '8px', marginBottom: '20px', fontSize: '0.9rem', border: '1px solid var(--success-green)' }}>{msg}</div>}
 
               <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                 <div>
@@ -175,7 +175,7 @@ export default function Auth({ setToken }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '30px' }}>
               {/* Feature 1 */}
               <div className="glass-panel" style={{ padding: '40px', transition: 'transform 0.3s ease, box-shadow 0.3s ease', cursor: 'default' }} onMouseOver={e => e.currentTarget.style.transform = 'translateY(-10px)'} onMouseOut={e => e.currentTarget.style.transform = 'translateY(0)'}>
-                <div style={{ background: 'rgba(0, 240, 255, 0.1)', width: '60px', height: '60px', borderRadius: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '25px', color: 'var(--accent-cyan)' }}>
+                <div style={{ background: 'rgba(59, 130, 246, 0.1)', width: '60px', height: '60px', borderRadius: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '25px', color: 'var(--accent-cyan)' }}>
                   <Zap size={30} />
                 </div>
                 <h3 style={{ fontSize: '1.4rem', marginBottom: '15px' }}>Instant Mitigation</h3>
@@ -197,7 +197,7 @@ export default function Auth({ setToken }) {
 
               {/* Feature 3 */}
               <div className="glass-panel" style={{ padding: '40px', transition: 'transform 0.3s ease, box-shadow 0.3s ease', cursor: 'default' }} onMouseOver={e => e.currentTarget.style.transform = 'translateY(-10px)'} onMouseOut={e => e.currentTarget.style.transform = 'translateY(0)'}>
-                <div style={{ background: 'rgba(0, 255, 157, 0.1)', width: '60px', height: '60px', borderRadius: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '25px', color: 'var(--success-green)' }}>
+                <div style={{ background: 'rgba(59, 130, 246, 0.08)', width: '60px', height: '60px', borderRadius: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '25px', color: 'var(--accent-cyan)' }}>
                   <Terminal size={30} />
                 </div>
                 <h3 style={{ fontSize: '1.4rem', marginBottom: '15px' }}>Remote Execution</h3>
