@@ -1,39 +1,39 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
 :root {
-  --bg-dark: #030508;
-  --bg-alt: #080c16;
-  --panel-bg: rgba(10, 15, 28, 0.45);
-  --panel-strong: rgba(14, 20, 36, 0.65);
-  --panel-border: rgba(92, 125, 255, 0.15);
-  --panel-border-strong: rgba(92, 125, 255, 0.35);
-  --panel-border-glow: rgba(92, 125, 255, 0.45);
+  --bg-dark: #000000;
+  --bg-alt: #050a05;
+  --panel-bg: rgba(0, 15, 0, 0.45);
+  --panel-strong: rgba(0, 20, 0, 0.65);
+  --panel-border: rgba(0, 255, 65, 0.3);
+  --panel-border-strong: rgba(0, 255, 65, 0.6);
+  --panel-border-glow: rgba(0, 255, 65, 0.8);
   
-  --accent-cyan: #00f0ff;
-  --accent-glow: rgba(0, 240, 255, 0.45);
-  --accent-blue: #3b82f6;
+  --accent-cyan: #00ff41;
+  --accent-glow: rgba(0, 255, 65, 0.45);
+  --accent-blue: #00aa2b;
   
-  --danger-red: #ff3366;
-  --danger-glow: rgba(255, 51, 102, 0.45);
+  --danger-red: #ff003c;
+  --danger-glow: rgba(255, 0, 60, 0.45);
   
-  --success-green: #00ff9d;
-  --success-glow: rgba(0, 255, 157, 0.35);
+  --success-green: #00ff41;
+  --success-glow: rgba(0, 255, 65, 0.35);
   
-  --warn-amber: #ffb800;
+  --warn-amber: #ffaa00;
   
-  --text-main: #ffffff;
-  --text-soft: #e2e8f0;
-  --text-muted: #8b9bb4;
+  --text-main: #e0ffe5;
+  --text-soft: #00ff41;
+  --text-muted: #00aa2b;
   
-  --shadow-lg: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
-  --shadow-sm: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 0px 30px rgba(0, 255, 65, 0.15);
+  --shadow-sm: 0 0px 15px rgba(0, 255, 65, 0.1);
   --shadow-glow: 0 0 20px var(--accent-glow);
   
-  --font-body: 'Outfit', sans-serif;
-  --font-display: 'Plus Jakarta Sans', sans-serif;
+  --font-body: 'JetBrains Mono', monospace;
+  --font-display: 'JetBrains Mono', monospace;
   --font-mono: 'JetBrains Mono', monospace;
   
-  --glass-blur: blur(24px);
+  --glass-blur: blur(0px);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -45,9 +45,9 @@ html, body, #root {
 body {
   background-color: var(--bg-dark);
   background-image: 
-    radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.15), transparent 25%),
-    radial-gradient(circle at 85% 30%, rgba(0, 240, 255, 0.1), transparent 25%),
-    linear-gradient(180deg, var(--bg-dark) 0%, #060913 100%);
+    radial-gradient(circle at 15% 50%, rgba(0, 255, 65, 0.05), transparent 25%),
+    radial-gradient(circle at 85% 30%, rgba(0, 255, 65, 0.08), transparent 25%),
+    linear-gradient(180deg, var(--bg-dark) 0%, #010301 100%);
   color: var(--text-main);
   font-family: var(--font-body);
   overflow-x: hidden;
@@ -60,12 +60,12 @@ body::before {
   position: fixed;
   inset: 0;
   background-image: 
-    linear-gradient(to right, rgba(255,255,255,0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255,255,255,0.03) 1px, transparent 1px);
-  background-size: 50px 50px;
-  mask-image: radial-gradient(circle at center, black 40%, transparent 80%);
+    linear-gradient(to right, rgba(0, 255, 65, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 255, 65, 0.08) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(circle at center, black 50%, transparent 90%);
   z-index: -2;
-  animation: bg-pan 90s linear infinite;
+  animation: bg-pan 60s linear infinite;
 }
 
 @keyframes bg-pan {
@@ -973,4 +973,54 @@ tr:hover td {
   .metric-grid { grid-template-columns: 1fr; }
   .terminal-form { flex-direction: column; align-items: stretch; }
   .page-title { font-size: 2.2rem; }
+}
+
+/* Hacker Theme Overrides */
+* {
+  border-radius: 0px !important;
+}
+
+.glass-panel, .hero-panel, input, select, button, .action-card, .metric-card, .terminal-log, .table-shell {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  border-color: var(--panel-border) !important;
+}
+
+.hero-panel {
+  background: var(--bg-alt) !important;
+}
+
+.nav-link.active {
+  background: rgba(0, 255, 65, 0.15) !important;
+  border-left: 4px solid var(--accent-cyan);
+}
+
+.nav-link.active::before {
+  display: none;
+}
+
+button {
+  background: transparent !important;
+  border: 1px solid var(--accent-cyan) !important;
+  color: var(--accent-cyan) !important;
+  text-transform: uppercase;
+}
+
+button:hover {
+  background: var(--accent-cyan) !important;
+  color: var(--bg-dark) !important;
+  box-shadow: 0 0 15px var(--accent-cyan) !important;
+}
+
+.status-pill.connected {
+  border: 1px solid var(--accent-cyan);
+  background: rgba(0, 255, 65, 0.1);
+  color: var(--accent-cyan);
+}
+
+.page-title, .brand-title {
+  background: none;
+  color: var(--accent-cyan);
+  -webkit-text-fill-color: var(--accent-cyan);
+  text-shadow: 0 0 10px var(--accent-glow);
 }

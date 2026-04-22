@@ -1,8 +1,8 @@
 /* Landing.css */
 .landing-body {
   min-height: 100vh;
-  background-color: var(--bg-dark);
-  color: var(--text-main);
+  background-color: #000000;
+  color: #e0ffe5;
   overflow-x: hidden;
   position: relative;
   z-index: 1;
@@ -12,7 +12,6 @@
   position: absolute;
   width: 600px;
   height: 600px;
-  border-radius: 50%;
   filter: blur(100px);
   z-index: -1;
   opacity: 0.15;
@@ -22,13 +21,13 @@
 .bg-glow-blue {
   top: -200px;
   left: -200px;
-  background: var(--accent-blue);
+  background: #00aa2b;
 }
 
 .bg-glow-cyan {
   bottom: -200px;
   right: -200px;
-  background: var(--accent-cyan);
+  background: #00ff41;
 }
 
 .content-wrapper {
@@ -50,9 +49,9 @@
 }
 
 .brand-icon {
-  color: var(--accent-cyan);
+  color: #00ff41;
   margin-bottom: 20px;
-  filter: drop-shadow(0 0 20px rgba(0, 240, 255, 0.4));
+  filter: drop-shadow(0 0 20px rgba(0, 255, 65, 0.4));
   cursor: pointer;
   transition: transform 0.3s ease;
 }
@@ -66,14 +65,13 @@
   font-weight: 700;
   letter-spacing: -1px;
   margin-bottom: 15px;
-  background: linear-gradient(to right, #fff, var(--text-muted));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: #00ff41;
+  text-shadow: 0 0 10px rgba(0, 255, 65, 0.45);
 }
 
 .brand-subtitle {
   font-size: 1.2rem;
-  color: var(--text-muted);
+  color: #00aa2b;
   font-weight: 400;
 }
 
@@ -89,13 +87,11 @@
   display: flex;
   align-items: center;
   padding: 24px 30px;
-  background: rgba(20, 20, 25, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
+  background: rgba(0, 15, 0, 0.6);
+  border: 1px solid rgba(0, 255, 65, 0.3);
   text-decoration: none;
-  color: var(--text-main);
+  color: #e0ffe5;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  backdrop-filter: blur(12px);
   position: relative;
   overflow: hidden;
   cursor: pointer;
@@ -105,35 +101,34 @@
   content: '';
   position: absolute;
   top: 0; left: 0; bottom: 0; width: 3px;
-  background: var(--text-muted);
+  background: #00aa2b;
   transition: all 0.3s ease;
 }
 
 .redirect-card:hover {
-  background: rgba(30, 30, 40, 0.8);
-  border-color: rgba(0, 240, 255, 0.3);
+  background: rgba(0, 30, 0, 0.8);
+  border-color: rgba(0, 255, 65, 0.6);
   transform: translateY(-4px);
-  box-shadow: 0 15px 30px rgba(0, 0, 0, 0.4), 0 0 20px rgba(0, 240, 255, 0.1);
+  box-shadow: 0 15px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 255, 65, 0.15);
 }
 
 .redirect-card:hover::before {
-  background: var(--accent-cyan);
+  background: #00ff41;
   width: 6px;
 }
 
 .primary-card {
-  border-color: rgba(0, 240, 255, 0.2);
+  border-color: rgba(0, 255, 65, 0.4);
 }
 .primary-card::before {
-  background: var(--accent-cyan);
+  background: #00ff41;
 }
 
 .card-icon-wrapper {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(0, 255, 65, 0.05);
   padding: 16px;
-  border-radius: 12px;
   margin-right: 20px;
-  color: var(--accent-cyan);
+  color: #00ff41;
 }
 
 .card-content {
@@ -149,15 +144,15 @@
 
 .card-content p {
   font-size: 0.95rem;
-  color: var(--text-muted);
+  color: #00aa2b;
 }
 
 .link-icon {
-  color: var(--text-muted);
+  color: #00aa2b;
   transition: color 0.3s, transform 0.3s;
 }
 
 .redirect-card:hover .link-icon {
-  color: var(--accent-cyan);
+  color: #00ff41;
   transform: translateX(4px) translateY(-4px);
 }
