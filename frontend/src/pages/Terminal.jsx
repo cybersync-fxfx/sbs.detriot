@@ -6,20 +6,26 @@ const quickActions = [
   'free -h',
   'df -h',
   'ss -ant | wc -l',
+  'top -bn1 | head -5',
   'systemctl status sbs-agent --no-pager',
   'tail -n 40 /var/log/sbs/agent.log',
+  'nft list ruleset | head -30',
 ];
 
 export default function Terminal({ token, user }) {
   const [logs, setLogs] = useState([
-    { text: 'SBS Secure Terminal Interface', level: 'info' },
-    { text: 'Run commands through the connected agent. Responses stream back when the agent completes the command.', level: 'default' }
+    { text: '[ SBS SECURE TERMINAL ]', level: 'info' },
+    { text: 'Agent commands execute on your protected server via the WebSocket channel.', level: 'default' },
   ]);
   const [input, setInput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [histIdx, setHistIdx] = useState(-1);
   const logEndRef = useRef(null);
   const { sendCommand, agentStatus, lastEvent, socketState } = useAgentCommands(token);
-  const commandReady = user?.agentStatus === 'CONNECTED' && socketState === 'open';
+  // Use the hook's live agentStatus — never the stale user prop
+  const liveConnected = agentStatus === 'CONNECTED';
+  const commandReady  = liveConnected && socketState === 'open';
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -36,15 +42,18 @@ export default function Terminal({ token, user }) {
 
   const runCommand = async (cmd) => {
     if (!cmd.trim()) return;
-
-    setLogs(prev => [...prev, { text: `> ${cmd}`, level: 'info' }]);
+    setLogs(prev => [...prev, { text: `root@server:~$ ${cmd}`, level: 'info' }]);
+    setHistory(prev => [cmd, ...prev].slice(0, 50));
+    setHistIdx(-1);
     setIsRunning(true);
-
     try {
       const result = await sendCommand(cmd.trim());
-      setLogs(prev => [...prev, { text: result.output || '(no output returned)', level: result.exitCode === 0 ? 'default' : 'error' }]);
+      setLogs(prev => [...prev, {
+        text: result.output || '(no output)',
+        level: result.exitCode === 0 ? 'default' : 'error'
+      }]);
     } catch (error) {
-      setLogs(prev => [...prev, { text: error.message, level: 'error' }]);
+      setLogs(prev => [...prev, { text: `[error] ${error.message}`, level: 'error' }]);
     } finally {
       setIsRunning(false);
     }
@@ -53,9 +62,24 @@ export default function Terminal({ token, user }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim()) return;
-    const nextCommand = input;
+    const cmd = input;
     setInput('');
-    await runCommand(nextCommand);
+    await runCommand(cmd);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const next = Math.min(histIdx + 1, history.length - 1);
+      setHistIdx(next);
+      if (history[next]) setInput(history[next]);
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const next = Math.max(histIdx - 1, -1);
+      setHistIdx(next);
+      setInput(next === -1 ? '' : history[next]);
+    }
   };
 
   return (
@@ -65,17 +89,29 @@ export default function Terminal({ token, user }) {
           <p className="eyebrow">Operations</p>
           <h1 className="page-title">Remote Terminal</h1>
           <p className="page-copy">
-            Execute diagnostics and server maintenance through the installed agent without opening a second control surface.
+            Execute live commands on your protected server through the secure agent channel.
           </p>
         </div>
         <div className="hero-status-stack">
-          <div className={`status-pill ${user?.agentStatus === 'CONNECTED' ? 'connected' : 'disconnected'}`}>
-            {user?.agentStatus === 'CONNECTED' ? 'Agent Ready' : 'Awaiting Agent'}
+          <div className={`status-pill ${liveConnected ? 'connected' : 'disconnected'}`}>
+            {liveConnected ? '● Agent Ready' : '○ No Agent'}
           </div>
-          <div className="meta-chip">Socket {socketState}</div>
-          <div className="meta-chip">Agent {agentStatus}</div>
+          <div className="meta-chip" style={{ color: socketState === 'open' ? 'var(--accent-cyan)' : 'var(--warn-amber)' }}>
+            WS {socketState}
+          </div>
         </div>
       </section>
+
+      {!commandReady && (
+        <section className="callout-banner warning">
+          <strong>[!]</strong>
+          <span>
+            {socketState === 'reconnecting'
+              ? 'WebSocket reconnecting — commands will be available once the connection is restored.'
+              : 'Agent not connected. Install the agent on your target server first.'}
+          </span>
+        </section>
+      )}
 
       <section className="glass-panel elevated-panel">
         <div className="panel-heading">
@@ -83,14 +119,12 @@ export default function Terminal({ token, user }) {
             <p className="eyebrow">Session</p>
             <h3>Live Command Console</h3>
           </div>
-          <div className="meta-chip">{isRunning ? 'Command in progress' : 'Idle'}</div>
+          <div className="meta-chip">{isRunning ? '[ Running... ]' : commandReady ? '[ Ready ]' : '[ Offline ]'}</div>
         </div>
 
         <div className="terminal-log terminal-large">
           {logs.map((log, idx) => (
-            <div key={`${idx}-${log.text}`} className={`log-line ${log.level}`}>
-              {log.text}
-            </div>
+            <div key={idx} className={`log-line ${log.level}`}>{log.text}</div>
           ))}
           <div ref={logEndRef} />
         </div>
@@ -100,14 +134,15 @@ export default function Terminal({ token, user }) {
           <input
             type="text"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
             className="terminal-input"
             autoComplete="off"
             disabled={isRunning || !commandReady}
-            placeholder="Enter a Linux command"
+            placeholder={commandReady ? 'Enter a Linux command (↑↓ history)' : 'Waiting for agent...'}
           />
           <button type="submit" disabled={isRunning || !commandReady}>
-            {isRunning ? 'Running...' : 'Execute'}
+            {isRunning ? '...' : 'RUN'}
           </button>
         </form>
 
@@ -128,3 +163,4 @@ export default function Terminal({ token, user }) {
     </div>
   );
 }
+
