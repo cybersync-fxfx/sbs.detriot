@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useAgentCommands } from '../hooks/useAgentCommands';
+import { useTelemetry } from '../context/TelemetryContext';
 
 const ipv4Pattern = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 
@@ -9,14 +9,12 @@ function extractBlockedIps(output) {
 }
 
 export default function Blocklist({ token, user }) {
+  const { sendCommand, isConnected, commandReady, wsState } = useTelemetry();
   const [ipInput, setIpInput] = useState('');
   const [ips, setIps] = useState([]);
   const [rawOutput, setRawOutput] = useState('');
   const [feedback, setFeedback] = useState('');
   const [isBusy, setIsBusy] = useState(false);
-  const { sendCommand, agentStatus, socketState } = useAgentCommands(token);
-  const liveAgentStatus = agentStatus === 'unknown' ? user?.agentStatus : agentStatus;
-  const commandReady = liveAgentStatus === 'CONNECTED' && socketState === 'open';
 
   const refreshBlocklist = async () => {
     setFeedback('');
@@ -36,10 +34,11 @@ export default function Blocklist({ token, user }) {
   };
 
   useEffect(() => {
-    if (liveAgentStatus === 'CONNECTED') {
+    if (commandReady) {
       refreshBlocklist();
     }
-  }, [liveAgentStatus]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commandReady]);
 
   const banIp = async () => {
     const nextIp = ipInput.trim();
@@ -94,8 +93,8 @@ export default function Blocklist({ token, user }) {
           </p>
         </div>
         <div className="hero-status-stack">
-          <div className={`status-pill ${liveAgentStatus === 'CONNECTED' ? 'connected' : 'disconnected'}`}>
-            {liveAgentStatus === 'CONNECTED' ? 'Agent Reachable' : 'Agent Not Reachable'}
+          <div className={`status-pill ${isConnected ? 'connected' : 'disconnected'}`}>
+            {isConnected ? 'Agent Reachable' : 'Agent Not Reachable'}
           </div>
           <div className="meta-chip">{summaryLabel}</div>
         </div>

@@ -1,55 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale, LinearScale, PointElement,
   LineElement, Tooltip, Legend, Filler,
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
+import { useTelemetry } from '../context/TelemetryContext';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler);
 
 const CHART_POINTS = 60;
 
-export default function Dashboard({ user, token }) {
-  const [stats, setStats] = useState({
-    connections: 0, bannedIPs: 0, cpuPercent: 0,
-    memPercent: 0, synRate: 0, pps: 0, uptime: 0,
-    inMbps: 0, outMbps: 0,
-    hostname: '-', ip: '-', os: '-', iface: '-',
-  });
-  const [tunnelStatus,    setTunnelStatus]    = useState('loading');
-  const [logs,            setLogs]            = useState([]);
-  const [lastUpdateMs,    setLastUpdateMs]    = useState(null);
-  const [ageSec,          setAgeSec]          = useState(null);
-  const [wsState,         setWsState]         = useState('connecting');
+export default function Dashboard({ token }) {
+  const {
+    stats, cpuHistory, netHistory, logs,
+    isConnected, wsState, lastUpdateMs, agentStatus,
+  } = useTelemetry();
 
-  const wsRef       = useRef(null);
-  const retryTimer  = useRef(null);
-  const retryCount  = useRef(0);
-  const unmounted   = useRef(false);
+  const [tunnelStatus, setTunnelStatus] = useState('loading');
+  const [ageSec,       setAgeSec]       = useState(null);
 
-  const emptyChart = (labels) => ({
-    labels: Array(CHART_POINTS).fill(''),
-    datasets: labels.map(l => ({
-      label: l.label,
-      borderColor: l.color,
-      backgroundColor: l.bg,
-      borderWidth: 1.5, tension: 0.4, fill: true,
-      data: Array(CHART_POINTS).fill(0), pointRadius: 0,
-    })),
-  });
-
-  const [cpuChart, setCpuChart] = useState(() => emptyChart([
-    { label: 'CPU %',  color: '#3b82f6', bg: 'rgba(59,130,246,0.08)'  },
-    { label: 'MEM %',  color: '#ef4444', bg: 'rgba(239,68,68,0.08)'   },
-  ]));
-
-  const [netChart, setNetChart] = useState(() => emptyChart([
-    { label: 'In (Mbps)',  color: '#3b82f6', bg: 'rgba(59,130,246,0.08)'  },
-    { label: 'Out (Mbps)', color: '#60a5fa', bg: 'rgba(96,165,250,0.08)'  },
-  ]));
-
-  // ── Live "age of telemetry" ticker ───────────────────────────────────────
+  // ── Live telemetry age ticker ────────────────────────────────────────────
   useEffect(() => {
     const id = setInterval(() => {
       setAgeSec(lastUpdateMs ? Math.floor((Date.now() - lastUpdateMs) / 1000) : null);
@@ -57,8 +28,7 @@ export default function Dashboard({ user, token }) {
     return () => clearInterval(id);
   }, [lastUpdateMs]);
 
-
-  // ── Fetch tunnel status once ──────────────────────────────────────────────
+  // ── Tunnel status ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!token) return;
     fetch('/api/agent/tunnel/status', { headers: { Authorization: `Bearer ${token}` } })
@@ -67,123 +37,36 @@ export default function Dashboard({ user, token }) {
       .catch(() => setTunnelStatus('inactive'));
   }, [token]);
 
-  // ── Dedicated WebSocket for the dashboard (auto-reconnects) ───────────────
-  const connectWs = () => {
-    if (!token || unmounted.current) return;
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
-    wsRef.current = ws;
-    setWsState('connecting');
+  // ── Build chart data objects from context history ─────────────────────────
+  const cpuChartData = useMemo(() => ({
+    labels: Array(CHART_POINTS).fill(''),
+    datasets: [
+      {
+        label: 'CPU %', borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.08)',
+        borderWidth: 1.5, tension: 0.4, fill: true, data: cpuHistory.cpu, pointRadius: 0,
+      },
+      {
+        label: 'MEM %', borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.08)',
+        borderWidth: 1.5, tension: 0.4, fill: true, data: cpuHistory.mem, pointRadius: 0,
+      },
+    ],
+  }), [cpuHistory]);
 
-    ws.onopen = () => {
-      retryCount.current = 0;
-      setWsState('connected');
-    };
+  const netChartData = useMemo(() => ({
+    labels: Array(CHART_POINTS).fill(''),
+    datasets: [
+      {
+        label: 'In (Mbps)', borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.08)',
+        borderWidth: 1.5, tension: 0.4, fill: true, data: netHistory.inb, pointRadius: 0,
+      },
+      {
+        label: 'Out (Mbps)', borderColor: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.08)',
+        borderWidth: 1.5, tension: 0.4, fill: true, data: netHistory.out, pointRadius: 0,
+      },
+    ],
+  }), [netHistory]);
 
-    ws.onmessage = (e) => {
-      let msg;
-      try { msg = JSON.parse(e.data); } catch { return; }
-
-      if (msg.type === 'agent_connected') {
-        setStats(prev => ({
-          ...prev,
-          hostname: msg.hostname || prev.hostname,
-          ip:       msg.ip       || prev.ip,
-          os:       msg.os       || prev.os,
-        }));
-        setLastUpdateMs(Date.now());
-      }
-
-      if (msg.type === 'agent_disconnected') {
-        setStats(prev => ({ ...prev, hostname: '-', ip: '-', os: '-' }));
-        setLastUpdateMs(null);
-      }
-
-      if (msg.type === 'stats_update') {
-        const s     = msg.stats  || {};
-        const agent = msg.agent  || {};
-        setLastUpdateMs(Date.now());
-
-        setStats(prev => ({
-          ...prev,
-          connections: s.connections  ?? prev.connections,
-          bannedIPs:   s.bannedIPs    ?? prev.bannedIPs,
-          cpuPercent:  s.cpuPercent   ?? prev.cpuPercent,
-          memPercent:  s.memPercent   ?? prev.memPercent,
-          synRate:     s.synRate      ?? prev.synRate,
-          pps:         s.pps          ?? prev.pps,
-          uptime:      s.uptime       ?? prev.uptime,
-          inMbps:      s.inMbps       ?? prev.inMbps,
-          outMbps:     s.outMbps      ?? prev.outMbps,
-          hostname:    agent.hostname || prev.hostname,
-          ip:          agent.ip       || prev.ip,
-          os:          agent.os       || prev.os,
-          iface:       s.iface        || prev.iface,
-        }));
-
-        // CPU/MEM chart
-        setCpuChart(prev => {
-          const cpu = [...prev.datasets[0].data.slice(1), Number((s.cpuPercent || 0).toFixed(1))];
-          const mem = [...prev.datasets[1].data.slice(1), Number((s.memPercent || 0).toFixed(1))];
-          return { ...prev, datasets: [
-            { ...prev.datasets[0], data: cpu },
-            { ...prev.datasets[1], data: mem },
-          ]};
-        });
-
-        // Network chart
-        setNetChart(prev => {
-          const inD  = [...prev.datasets[0].data.slice(1), Number((s.inMbps  || 0).toFixed(3))];
-          const outD = [...prev.datasets[1].data.slice(1), Number((s.outMbps || 0).toFixed(3))];
-          return { ...prev, datasets: [
-            { ...prev.datasets[0], data: inD  },
-            { ...prev.datasets[1], data: outD },
-          ]};
-        });
-
-        if (s.log && s.log.trim()) {
-          const lines = s.log.split('\n').filter(l => l.trim()).map(l => {
-            let level = 'default';
-            if (/\[FW\].*ban|drop|block/i.test(l))            level = 'error';
-            if (/\[FW\].*accept/i.test(l))                    level = 'success';
-            if (/\[SSH\].*Failed|Invalid|error/i.test(l))     level = 'error';
-            if (/\[SSH\].*Accepted/i.test(l))                 level = 'success';
-            if (/\[SSH\].*Disconnected/i.test(l))             level = 'info';
-            return { text: `[${new Date().toLocaleTimeString()}] ${l}`, level };
-          });
-          setLogs(prev => [...lines, ...prev].slice(0, 200));
-        }
-      }
-
-    };
-
-    ws.onerror = () => {
-      if (!unmounted.current) setWsState('error');
-    };
-
-    ws.onclose = () => {
-      if (unmounted.current) return;
-      setWsState('reconnecting');
-      const delay = Math.min(1000 * Math.pow(2, retryCount.current), 8000);
-      retryCount.current += 1;
-      retryTimer.current = setTimeout(connectWs, delay);
-    };
-  };
-
-  useEffect(() => {
-    unmounted.current = false;
-    connectWs();
-    return () => {
-      unmounted.current = true;
-      clearTimeout(retryTimer.current);
-      if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close(); }
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
-
-  // ── Derived values ────────────────────────────────────────────────────────
-  const isConnected = user?.agentStatus === 'CONNECTED';
-
+  // ── Derived ──────────────────────────────────────────────────────────────
   const uptimeLabel = useMemo(() => {
     if (!stats.uptime) return '—';
     if (stats.uptime > 86400) return `${(stats.uptime / 86400).toFixed(1)}d`;
@@ -198,33 +81,28 @@ export default function Dashboard({ user, token }) {
     return `${ageSec}s ago`;
   }, [isConnected, ageSec]);
 
-  const wsLabel = {
-    connected:    'WS OK',
-    connecting:   'WS Connecting',
-    reconnecting: 'WS Reconnecting',
-    error:        'WS Error',
-  }[wsState] || wsState;
+  const wsLabel = { open: 'WS OK', connecting: 'WS Connecting', reconnecting: 'WS Reconnecting', error: 'WS Error' }[wsState] || wsState;
 
   const statCards = [
-    { label: 'Active Connections', value: stats.connections,             tone: 'blue' },
-    { label: 'Blocked IPs',        value: stats.bannedIPs,               tone: 'red'  },
-    { label: 'CPU Usage',          value: `${stats.cpuPercent.toFixed(1)}%`, tone: 'blue' },
-    { label: 'Memory',             value: `${(stats.memPercent || 0).toFixed(1)}%`, tone: 'red' },
+    { label: 'Active Connections', value: stats.connections,                tone: 'blue' },
+    { label: 'Blocked IPs',       value: stats.bannedIPs,                  tone: 'red'  },
+    { label: 'CPU Usage',         value: `${stats.cpuPercent.toFixed(1)}%`, tone: 'blue' },
+    { label: 'Memory',            value: `${(stats.memPercent || 0).toFixed(1)}%`, tone: 'red' },
   ];
 
   const agentFacts = [
-    { label: 'Hostname',    value: stats.hostname },
-    { label: 'IP Address',  value: stats.ip },
-    { label: 'OS',          value: stats.os || '—' },
-    { label: 'Interface',   value: stats.iface },
-    { label: 'Uptime',      value: uptimeLabel },
-    { label: 'In (Mbps)',   value: stats.inMbps.toFixed(3) },
-    { label: 'Out (Mbps)',  value: stats.outMbps.toFixed(3) },
-    { label: 'SYN Rate',    value: stats.synRate },
-    { label: 'Tunnel',      value: tunnelStatus === 'loading' ? '...' : tunnelStatus },
-    { label: 'Guard Host',  value: window.location.hostname },
-    { label: 'Telemetry',   value: telemetryLabel },
-    { label: 'WebSocket',   value: wsLabel },
+    { label: 'Hostname',   value: stats.hostname },
+    { label: 'IP Address', value: stats.ip },
+    { label: 'OS',         value: stats.os || '—' },
+    { label: 'Interface',  value: stats.iface },
+    { label: 'Uptime',     value: uptimeLabel },
+    { label: 'In (Mbps)',  value: stats.inMbps.toFixed(3) },
+    { label: 'Out (Mbps)', value: stats.outMbps.toFixed(3) },
+    { label: 'SYN Rate',   value: stats.synRate },
+    { label: 'Tunnel',     value: tunnelStatus === 'loading' ? '...' : tunnelStatus },
+    { label: 'Guard Host', value: window.location.hostname },
+    { label: 'Telemetry',  value: telemetryLabel },
+    { label: 'WebSocket',  value: wsLabel },
   ];
 
   const chartOptions = (yLabel, maxY) => ({
@@ -232,15 +110,12 @@ export default function Dashboard({ user, token }) {
     maintainAspectRatio: false,
     animation: { duration: 400, easing: 'linear' },
     plugins: {
-      legend: {
-        labels: { color: '#64748b', font: { family: 'JetBrains Mono', size: 11 } }
-      }
+      legend: { labels: { color: '#64748b', font: { family: 'JetBrains Mono', size: 11 } } }
     },
     scales: {
       y: {
-        min: 0,
-        ...(maxY ? { max: maxY } : {}),
-        grid:  { color: 'rgba(59,130,246,0.08)' },
+        min: 0, ...(maxY ? { max: maxY } : {}),
+        grid: { color: 'rgba(59,130,246,0.08)' },
         ticks: { color: '#64748b', font: { family: 'JetBrains Mono', size: 10 }, callback: v => `${v}${yLabel}` }
       },
       x: { grid: { display: false }, ticks: { display: false } }
@@ -250,33 +125,25 @@ export default function Dashboard({ user, token }) {
   return (
     <div className="page-shell">
 
-      {/* ── Hero ─────────────────────────────────────────────────────── */}
       <section className="hero-panel">
         <div>
           <p className="eyebrow">Operations Center</p>
           <h1 className="page-title">System Dashboard</h1>
-          <p className="page-copy">
-            Live telemetry · network traffic · SSH events · firewall metrics
-          </p>
+          <p className="page-copy">Live telemetry · network traffic · SSH events · firewall metrics</p>
         </div>
         <div className="hero-status-stack">
           <div className={`status-pill ${isConnected ? 'connected' : 'disconnected'}`}>
             {isConnected ? '● Agent Online' : '○ No Agent'}
           </div>
-          <div className="meta-chip" style={{
-            color: ageSec !== null && ageSec < 3 ? 'var(--accent-cyan)' : undefined,
-          }}>
+          <div className="meta-chip" style={{ color: ageSec !== null && ageSec < 3 ? 'var(--accent-cyan)' : undefined }}>
             {telemetryLabel}
           </div>
-          <div className="meta-chip" style={{
-            color: wsState === 'connected' ? 'var(--accent-cyan)' : 'var(--warn-amber)'
-          }}>
+          <div className="meta-chip" style={{ color: wsState === 'open' ? 'var(--accent-cyan)' : 'var(--warn-amber)' }}>
             {wsLabel}
           </div>
         </div>
       </section>
 
-      {/* ── Warning banner ───────────────────────────────────────────── */}
       {!isConnected && (
         <section className="callout-banner warning">
           <strong>[!]</strong>
@@ -284,7 +151,6 @@ export default function Dashboard({ user, token }) {
         </section>
       )}
 
-      {/* ── Metric cards ─────────────────────────────────────────────── */}
       <section className="metric-grid">
         {statCards.map(card => (
           <article key={card.label} className={`metric-card tone-${card.tone}`}>
@@ -294,27 +160,20 @@ export default function Dashboard({ user, token }) {
         ))}
       </section>
 
-      {/* ── CPU/MEM Chart + Facts ─────────────────────────────────────── */}
       <section className="content-grid two-up">
         <article className="glass-panel elevated-panel">
           <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Telemetry</p>
-              <h3>CPU &amp; Memory — Live</h3>
-            </div>
+            <div><p className="eyebrow">Telemetry</p><h3>CPU &amp; Memory — Live</h3></div>
             <div className="meta-chip">{CHART_POINTS}s window</div>
           </div>
           <div className="chart-frame">
-            <Line data={cpuChart} options={chartOptions('%', 100)} />
+            <Line data={cpuChartData} options={chartOptions('%', 100)} />
           </div>
         </article>
 
         <article className="glass-panel elevated-panel">
           <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Agent</p>
-              <h3>Live Facts</h3>
-            </div>
+            <div><p className="eyebrow">Agent</p><h3>Live Facts</h3></div>
             <div className="meta-chip">{isConnected ? 'LIVE' : 'idle'}</div>
           </div>
           <div className="fact-list">
@@ -322,90 +181,49 @@ export default function Dashboard({ user, token }) {
               <div key={item.label} className="fact-row">
                 <span>{item.label}</span>
                 <span className={`fact-value ${
-                  (item.label === 'Tunnel'    && tunnelStatus !== 'active')  ? 'danger' :
-                  (item.label === 'WebSocket' && wsState !== 'connected')   ? 'danger' : ''
-                }`}>
-                  {item.value}
-                </span>
+                  (item.label === 'Tunnel' && tunnelStatus !== 'active') ? 'danger' :
+                  (item.label === 'WebSocket' && wsState !== 'open') ? 'danger' : ''
+                }`}>{item.value}</span>
               </div>
             ))}
           </div>
         </article>
       </section>
 
-      {/* ── Network Chart ────────────────────────────────────────────── */}
       <section className="glass-panel elevated-panel">
         <div className="panel-heading">
-          <div>
-            <p className="eyebrow">Network</p>
-            <h3>Live Bandwidth — {stats.iface !== '-' ? stats.iface : 'Primary Interface'}</h3>
-          </div>
+          <div><p className="eyebrow">Network</p><h3>Live Bandwidth — {stats.iface !== '-' ? stats.iface : 'Primary Interface'}</h3></div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <div className="meta-chip" style={{ color: 'var(--accent-cyan)' }}>
-              ↓ {stats.inMbps.toFixed(3)} Mbps
-            </div>
-            <div className="meta-chip" style={{ color: 'var(--warn-amber)' }}>
-              ↑ {stats.outMbps.toFixed(3)} Mbps
-            </div>
+            <div className="meta-chip" style={{ color: 'var(--accent-cyan)' }}>↓ {stats.inMbps.toFixed(3)} Mbps</div>
+            <div className="meta-chip" style={{ color: 'var(--warn-amber)' }}>↑ {stats.outMbps.toFixed(3)} Mbps</div>
           </div>
         </div>
         <div className="chart-frame">
-          <Line data={netChart} options={chartOptions(' Mbps', undefined)} />
+          <Line data={netChartData} options={chartOptions(' Mbps', undefined)} />
         </div>
       </section>
 
-      {/* ── Threat signals ───────────────────────────────────────────── */}
       <section className="content-grid two-up">
         <article className="glass-panel elevated-panel">
-          <div className="panel-heading">
-            <div><p className="eyebrow">Signals</p><h3>Threat Markers</h3></div>
-          </div>
+          <div className="panel-heading"><div><p className="eyebrow">Signals</p><h3>Threat Markers</h3></div></div>
           <div className="fact-list compact">
-            <div className="fact-row"><span>SYN Rate</span>
-              <span className={`fact-value ${stats.synRate > 500 ? 'danger' : ''}`}>{stats.synRate}/s</span>
-            </div>
-            <div className="fact-row"><span>Packets / Sec</span>
-              <span className="fact-value">{stats.pps}</span>
-            </div>
-            <div className="fact-row"><span>Blocked IPs</span>
-              <span className={`fact-value ${stats.bannedIPs > 0 ? 'danger' : ''}`}>{stats.bannedIPs}</span>
-            </div>
-            <div className="fact-row"><span>Established TCP</span>
-              <span className="fact-value">{stats.connections}</span>
-            </div>
+            <div className="fact-row"><span>SYN Rate</span><span className={`fact-value ${stats.synRate > 500 ? 'danger' : ''}`}>{stats.synRate}/s</span></div>
+            <div className="fact-row"><span>Packets / Sec</span><span className="fact-value">{stats.pps}</span></div>
+            <div className="fact-row"><span>Blocked IPs</span><span className={`fact-value ${stats.bannedIPs > 0 ? 'danger' : ''}`}>{stats.bannedIPs}</span></div>
+            <div className="fact-row"><span>Established TCP</span><span className="fact-value">{stats.connections}</span></div>
           </div>
         </article>
-
         <article className="glass-panel elevated-panel">
-          <div className="panel-heading">
-            <div><p className="eyebrow">Protection</p><h3>Current Posture</h3></div>
-          </div>
+          <div className="panel-heading"><div><p className="eyebrow">Protection</p><h3>Current Posture</h3></div></div>
           <div className="fact-list compact">
-            <div className="fact-row"><span>Agent Presence</span>
-              <span className={`fact-value ${isConnected ? '' : 'danger'}`}>
-                {isConnected ? 'Connected' : 'Offline'}
-              </span>
-            </div>
-            <div className="fact-row"><span>Tunnel Routing</span>
-              <span className={`fact-value ${tunnelStatus === 'active' ? '' : 'danger'}`}>
-                {tunnelStatus === 'loading' ? '...' : tunnelStatus === 'active' ? 'Active' : 'Inactive'}
-              </span>
-            </div>
-            <div className="fact-row"><span>Command Channel</span>
-              <span className={`fact-value ${isConnected ? '' : 'danger'}`}>
-                {isConnected ? 'Ready' : 'Waiting for agent'}
-              </span>
-            </div>
-            <div className="fact-row"><span>Firewall Status</span>
-              <span className={`fact-value ${isConnected ? '' : 'danger'}`}>
-                {isConnected ? 'Active' : 'Unknown'}
-              </span>
-            </div>
+            <div className="fact-row"><span>Agent Presence</span><span className={`fact-value ${isConnected ? '' : 'danger'}`}>{isConnected ? 'Connected' : 'Offline'}</span></div>
+            <div className="fact-row"><span>Tunnel Routing</span><span className={`fact-value ${tunnelStatus === 'active' ? '' : 'danger'}`}>{tunnelStatus === 'loading' ? '...' : tunnelStatus === 'active' ? 'Active' : 'Inactive'}</span></div>
+            <div className="fact-row"><span>Command Channel</span><span className={`fact-value ${isConnected ? '' : 'danger'}`}>{isConnected ? 'Ready' : 'Waiting for agent'}</span></div>
+            <div className="fact-row"><span>Firewall Status</span><span className={`fact-value ${isConnected ? '' : 'danger'}`}>{isConnected ? 'Active' : 'Unknown'}</span></div>
           </div>
         </article>
       </section>
 
-      {/* ── Live Security Log ────────────────────────────────────────── */}
       <section className="glass-panel elevated-panel">
         <div className="panel-heading">
           <div><p className="eyebrow">Events</p><h3>Live Security Log — SSH + Firewall</h3></div>
@@ -424,10 +242,6 @@ export default function Dashboard({ user, token }) {
           }
         </div>
       </section>
-
     </div>
   );
 }
-
-
-

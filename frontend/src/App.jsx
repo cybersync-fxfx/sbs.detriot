@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { TelemetryProvider } from './context/TelemetryContext';
 import Landing  from './pages/Landing';
 import Auth     from './pages/Auth';
 import Layout   from './components/Layout';
@@ -16,7 +17,7 @@ function App() {
   const [user,    setUser]    = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // ── Fetch /api/me and keep user + agentStatus fresh ──────────────────────
+  // ── Fetch /api/me ─────────────────────────────────────────────────────────
   const fetchMe = useCallback((tk) => {
     fetch('/api/me', { headers: { Authorization: `Bearer ${tk}` } })
       .then(res => {
@@ -50,53 +51,7 @@ function App() {
     }
   }, [token]);
 
-  // ── App-level WebSocket — keeps agentStatus live across all pages ─────────
-  const wsRef        = useRef(null);
-  const retryTimer   = useRef(null);
-  const retryCount   = useRef(0);
-  const wsActive     = useRef(false);
-
-  const connectWs = useCallback(() => {
-    if (!token || !wsActive.current) return;
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}?token=${token}`);
-    wsRef.current = ws;
-
-    ws.onmessage = (e) => {
-      let msg;
-      try { msg = JSON.parse(e.data); } catch { return; }
-
-      if (msg.type === 'agent_connected' || msg.type === 'stats_update') {
-        setUser(prev => prev ? { ...prev, agentStatus: 'CONNECTED' } : prev);
-      }
-      if (msg.type === 'agent_disconnected') {
-        setUser(prev => prev ? { ...prev, agentStatus: 'NO AGENT' } : prev);
-      }
-    };
-
-    ws.onclose = () => {
-      if (!wsActive.current) return;
-      const delay = Math.min(1000 * Math.pow(2, retryCount.current), 10000);
-      retryCount.current += 1;
-      retryTimer.current = setTimeout(connectWs, delay);
-    };
-
-    ws.onerror = () => ws.close();
-  }, [token]);
-
-  useEffect(() => {
-    if (!token || !user) return;
-    wsActive.current = true;
-    retryCount.current = 0;
-    connectWs();
-    return () => {
-      wsActive.current = false;
-      clearTimeout(retryTimer.current);
-      if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close(); }
-    };
-  }, [token, user?.id, connectWs]);
-
-  // ── Poll /api/me every 10 s to ensure agentStatus stays accurate ──────────
+  // Poll /api/me every 10s to keep user fresh
   useEffect(() => {
     if (!token || !user) return;
     const id = setInterval(() => fetchMe(token), 10000);
@@ -108,7 +63,6 @@ function App() {
     localStorage.setItem('sbs_token', t);
   };
 
-  // ── Loading screen ────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div style={{
@@ -142,8 +96,12 @@ function App() {
             <Route path="*"      element={<Navigate to="/" />} />
           </>
         ) : (
-          <Route element={<Layout user={user} setToken={setToken} />}>
-            <Route path="/"          element={<Dashboard user={user} token={token} />} />
+          <Route element={
+            <TelemetryProvider token={token}>
+              <Layout user={user} setToken={setToken} />
+            </TelemetryProvider>
+          }>
+            <Route path="/"          element={<Dashboard token={token} />} />
             <Route path="/terminal"  element={<Terminal  token={token} user={user} />} />
             <Route path="/firewall"  element={<Firewall  token={token} user={user} />} />
             <Route path="/blocklist" element={<Blocklist token={token} user={user} />} />

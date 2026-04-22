@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Activity, Terminal, Shield, ListX, Download, Key, Settings, LogOut, RadioTower, ServerCog } from 'lucide-react';
+import { useTelemetry } from '../context/TelemetryContext';
 
 export default function Layout({ user, setToken }) {
   const navigate = useNavigate();
@@ -31,7 +32,7 @@ export default function Layout({ user, setToken }) {
     { path: '/settings', name: 'Settings', icon: <Settings size={18} />, caption: 'Account details and network controls' },
   ];
 
-  const isConnected = user?.agentStatus === 'CONNECTED';
+  const { isConnected, agentStatus, wsState } = useTelemetry();
 
   return (
     <div className="app-layout">
@@ -47,7 +48,7 @@ export default function Layout({ user, setToken }) {
         <div className="topbar-meta">
           <div className={`status-pill ${isConnected ? 'connected' : 'disconnected'}`}>
             <RadioTower size={14} />
-            {user?.agentStatus || 'NO AGENT'}
+            {agentStatus === 'CONNECTED' ? 'CONNECTED' : 'NO AGENT'}
           </div>
           <div className="topbar-time">{time}</div>
           <div className="user-chip">@{user?.username}</div>

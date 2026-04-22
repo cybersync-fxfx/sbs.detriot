@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useAgentCommands } from '../hooks/useAgentCommands';
+import { useTelemetry } from '../context/TelemetryContext';
 
 const quickActions = [
   'uptime',
@@ -13,32 +13,21 @@ const quickActions = [
 ];
 
 export default function Terminal({ token, user }) {
+  const { sendCommand, isConnected, commandReady, wsState } = useTelemetry();
+
   const [logs, setLogs] = useState([
     { text: '[ SBS SECURE TERMINAL ]', level: 'info' },
-    { text: 'Agent commands execute on your protected server via the WebSocket channel.', level: 'default' },
+    { text: 'Agent commands execute on your protected server via the secure channel.', level: 'default' },
   ]);
   const [input, setInput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
   const [history, setHistory] = useState([]);
   const [histIdx, setHistIdx] = useState(-1);
   const logEndRef = useRef(null);
-  const { sendCommand, agentStatus, lastEvent, socketState } = useAgentCommands(token);
-  // Use the hook's live agentStatus — never the stale user prop
-  const liveConnected = agentStatus === 'CONNECTED';
-  const commandReady  = liveConnected && socketState === 'open';
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
-
-  useEffect(() => {
-    if (lastEvent?.type === 'agent_connected') {
-      setLogs(prev => [...prev, { text: `Agent connected from ${lastEvent.ip || 'unknown ip'} (${lastEvent.hostname || 'server'})`, level: 'success' }]);
-    }
-    if (lastEvent?.type === 'agent_disconnected') {
-      setLogs(prev => [...prev, { text: 'Agent disconnected or heartbeat expired.', level: 'error' }]);
-    }
-  }, [lastEvent]);
 
   const runCommand = async (cmd) => {
     if (!cmd.trim()) return;
@@ -88,16 +77,14 @@ export default function Terminal({ token, user }) {
         <div>
           <p className="eyebrow">Operations</p>
           <h1 className="page-title">Remote Terminal</h1>
-          <p className="page-copy">
-            Execute live commands on your protected server through the secure agent channel.
-          </p>
+          <p className="page-copy">Execute live commands on your protected server through the secure agent channel.</p>
         </div>
         <div className="hero-status-stack">
-          <div className={`status-pill ${liveConnected ? 'connected' : 'disconnected'}`}>
-            {liveConnected ? '● Agent Ready' : '○ No Agent'}
+          <div className={`status-pill ${isConnected ? 'connected' : 'disconnected'}`}>
+            {isConnected ? '● Agent Ready' : '○ No Agent'}
           </div>
-          <div className="meta-chip" style={{ color: socketState === 'open' ? 'var(--accent-cyan)' : 'var(--warn-amber)' }}>
-            WS {socketState}
+          <div className="meta-chip" style={{ color: wsState === 'open' ? 'var(--accent-cyan)' : 'var(--warn-amber)' }}>
+            WS {wsState}
           </div>
         </div>
       </section>
@@ -106,8 +93,8 @@ export default function Terminal({ token, user }) {
         <section className="callout-banner warning">
           <strong>[!]</strong>
           <span>
-            {socketState === 'reconnecting'
-              ? 'WebSocket reconnecting — commands will be available once the connection is restored.'
+            {wsState === 'reconnecting'
+              ? 'Reconnecting — commands will be available once the connection is restored.'
               : 'Agent not connected. Install the agent on your target server first.'}
           </span>
         </section>
@@ -115,10 +102,7 @@ export default function Terminal({ token, user }) {
 
       <section className="glass-panel elevated-panel">
         <div className="panel-heading">
-          <div>
-            <p className="eyebrow">Session</p>
-            <h3>Live Command Console</h3>
-          </div>
+          <div><p className="eyebrow">Session</p><h3>Live Command Console</h3></div>
           <div className="meta-chip">{isRunning ? '[ Running... ]' : commandReady ? '[ Ready ]' : '[ Offline ]'}</div>
         </div>
 
@@ -139,7 +123,7 @@ export default function Terminal({ token, user }) {
             className="terminal-input"
             autoComplete="off"
             disabled={isRunning || !commandReady}
-            placeholder={commandReady ? 'Enter a Linux command (↑↓ history)' : 'Waiting for agent...'}
+            placeholder={commandReady ? 'Enter a command (↑↓ history)' : 'Waiting for agent...'}
           />
           <button type="submit" disabled={isRunning || !commandReady}>
             {isRunning ? '...' : 'RUN'}
@@ -148,13 +132,8 @@ export default function Terminal({ token, user }) {
 
         <div className="action-grid">
           {quickActions.map(cmd => (
-            <button
-              key={cmd}
-              type="button"
-              className="secondary-button"
-              onClick={() => runCommand(cmd)}
-              disabled={isRunning || !commandReady}
-            >
+            <button key={cmd} type="button" className="secondary-button"
+              onClick={() => runCommand(cmd)} disabled={isRunning || !commandReady}>
               {cmd}
             </button>
           ))}
@@ -163,4 +142,3 @@ export default function Terminal({ token, user }) {
     </div>
   );
 }
-
