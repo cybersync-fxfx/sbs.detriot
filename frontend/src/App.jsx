@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import Landing from './pages/Landing';
 import Auth from './pages/Auth';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
@@ -63,7 +64,11 @@ function App() {
     <BrowserRouter>
       <Routes>
         {!token ? (
-          <Route path="*" element={<Auth setToken={(t) => { setToken(t); localStorage.setItem('sbs_token', t); }} />} />
+          <>
+            <Route path="/" element={<Landing />} />
+            <Route path="/login" element={<Auth setToken={(t) => { setToken(t); localStorage.setItem('sbs_token', t); }} />} />
+            <Route path="*" element={<Navigate to="/" />} />
+          </>
         ) : (
           <Route element={<Layout user={user} setToken={setToken} />}>
             <Route path="/" element={<Dashboard user={user} />} />
