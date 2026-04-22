@@ -666,6 +666,14 @@ setInterval(() => {
   }
 }, 5000);
 
+app.get('/api/internal/agents', (req, res) => {
+  const clientIp = req.socket.remoteAddress;
+  if (clientIp !== '127.0.0.1' && clientIp !== '::1' && clientIp !== '::ffff:127.0.0.1') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  res.json(db.agents);
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ ok: true });
 });
