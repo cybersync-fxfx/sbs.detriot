@@ -28,11 +28,23 @@ export default function Blocklist() {
     if (!silent) setLoading(true);
     console.log('[Blocklist] Refreshing... silent:', silent);
     try {
-      const result = await sendCommand(`${NFT_DETECT}; nft list set $NFT_TABLE blacklist`);
+      const cmd = `
+        NFT_TABLE='inet detroit_guard';
+        if ! nft list set $NFT_TABLE blacklist >/dev/null 2>&1; then
+          nft add table $NFT_TABLE 2>/dev/null || true;
+          nft add set $NFT_TABLE blacklist { type ipv4_addr; flags dynamic,timeout; timeout 24h; } 2>/dev/null || true;
+        fi;
+        nft list set $NFT_TABLE blacklist
+      `.replace(/\n/g, ' ').trim();
+
+      const result = await sendCommand(cmd);
       console.log('[Blocklist] Refresh result:', result);
       const output = result.output || '';
       if (result.exitCode !== 0 && result.exitCode != null) {
-        setFeedback({ msg: `nft error (exit ${result.exitCode})`, type: 'danger' });
+        setFeedback({ 
+          msg: `nft error (exit ${result.exitCode}): ${output.split('\n')[0] || 'Unknown error'}`, 
+          type: 'danger' 
+        });
         return;
       }
       setIps(extractBlockedIps(output));
