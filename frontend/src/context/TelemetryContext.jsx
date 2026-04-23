@@ -3,6 +3,31 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 const CHART_POINTS = 60;
 const emptyArr = () => Array(CHART_POINTS).fill(0);
 
+const STORAGE_KEY = 'sbs_telemetry_v2';
+
+// ── Persist / restore helpers ─────────────────────────────────────────────────
+function saveToStorage(data) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      ...data,
+      savedAt: Date.now(),
+    }));
+  } catch (_) {}
+}
+
+function loadFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    // Only restore if saved within the last 10 minutes
+    if (Date.now() - (parsed.savedAt || 0) > 10 * 60 * 1000) return null;
+    return parsed;
+  } catch (_) {
+    return null;
+  }
+}
+
 const TelemetryContext = createContext(null);
 
 export function useTelemetry() {
@@ -10,22 +35,59 @@ export function useTelemetry() {
 }
 
 export function TelemetryProvider({ token, children }) {
-  // ── Persistent state (survives page navigation) ──────────────────────────
+  // ── Restore persisted state on first render ───────────────────────────────
+  const saved = loadFromStorage();
+
   const [wsState,     setWsState]     = useState('connecting');
-  const [agentStatus, setAgentStatus] = useState('unknown');
+  const [agentStatus, setAgentStatus] = useState(saved?.agentStatus || 'unknown');
   const [lastEvent,   setLastEvent]   = useState(null);
 
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState(saved?.stats ?? {
     connections: 0, bannedIPs: 0, cpuPercent: 0,
     memPercent: 0, synRate: 0, pps: 0, uptime: 0,
     inMbps: 0, outMbps: 0,
     hostname: '-', ip: '-', os: '-', iface: '-',
   });
 
-  const [cpuHistory, setCpuHistory] = useState({ cpu: emptyArr(), mem: emptyArr() });
-  const [netHistory, setNetHistory] = useState({ inb: emptyArr(), out: emptyArr() });
-  const [logs,       setLogs]       = useState([]);
-  const [lastUpdateMs, setLastUpdateMs] = useState(null);
+  const [cpuHistory, setCpuHistory] = useState(saved?.cpuHistory ?? { cpu: emptyArr(), mem: emptyArr() });
+  const [netHistory, setNetHistory] = useState(saved?.netHistory ?? { inb: emptyArr(), out: emptyArr() });
+  const [logs,       setLogs]       = useState(saved?.logs ?? []);
+  const [lastUpdateMs, setLastUpdateMs] = useState(saved?.lastUpdateMs ?? null);
+
+  // ── Persist to localStorage whenever key state changes ────────────────────
+  const statsRef      = useRef(stats);
+  const cpuHistRef    = useRef(cpuHistory);
+  const netHistRef    = useRef(netHistory);
+  const logsRef       = useRef(logs);
+  const lastUpdateRef = useRef(lastUpdateMs);
+  const agentStatRef  = useRef(agentStatus);
+
+  // Keep refs up-to-date
+  useEffect(() => { statsRef.current = stats; }, [stats]);
+  useEffect(() => { cpuHistRef.current = cpuHistory; }, [cpuHistory]);
+  useEffect(() => { netHistRef.current = netHistory; }, [netHistory]);
+  useEffect(() => { logsRef.current = logs; }, [logs]);
+  useEffect(() => { lastUpdateRef.current = lastUpdateMs; }, [lastUpdateMs]);
+  useEffect(() => { agentStatRef.current = agentStatus; }, [agentStatus]);
+
+  // Debounced save — write to localStorage at most once per second
+  const saveTimerRef = useRef(null);
+  const scheduleSave = useCallback(() => {
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveToStorage({
+        stats:        statsRef.current,
+        cpuHistory:   cpuHistRef.current,
+        netHistory:   netHistRef.current,
+        logs:         logsRef.current.slice(0, 200),
+        lastUpdateMs: lastUpdateRef.current,
+        agentStatus:  agentStatRef.current,
+      });
+    }, 1000);
+  }, []);
+
+  // Save whenever any piece of state updates
+  useEffect(() => { scheduleSave(); }, [stats, cpuHistory, netHistory, logs, scheduleSave]);
 
   // ── WebSocket management ─────────────────────────────────────────────────
   const wsRef       = useRef(null);
@@ -33,6 +95,55 @@ export function TelemetryProvider({ token, children }) {
   const retryCount  = useRef(0);
   const unmounted   = useRef(false);
   const pendingCmds = useRef(new Map());
+
+  const processStatsUpdate = useCallback((msg) => {
+    setAgentStatus('CONNECTED');
+    const s     = msg.stats  || {};
+    const agent = msg.agent  || {};
+    setLastUpdateMs(Date.now());
+
+    setStats(prev => ({
+      ...prev,
+      connections: s.connections  ?? prev.connections,
+      bannedIPs:   s.bannedIPs    ?? prev.bannedIPs,
+      cpuPercent:  s.cpuPercent   ?? prev.cpuPercent,
+      memPercent:  s.memPercent   ?? prev.memPercent,
+      synRate:     s.synRate      ?? prev.synRate,
+      pps:         s.pps          ?? prev.pps,
+      uptime:      s.uptime       ?? prev.uptime,
+      inMbps:      s.inMbps       ?? prev.inMbps,
+      outMbps:     s.outMbps      ?? prev.outMbps,
+      hostname:    agent.hostname || prev.hostname,
+      ip:          agent.ip       || prev.ip,
+      os:          agent.os       || prev.os,
+      iface:       s.iface        || prev.iface,
+    }));
+
+    // Rolling chart history — always accumulate, even off-screen
+    setCpuHistory(prev => ({
+      cpu: [...prev.cpu.slice(1), Number((s.cpuPercent || 0).toFixed(1))],
+      mem: [...prev.mem.slice(1), Number((s.memPercent || 0).toFixed(1))],
+    }));
+
+    setNetHistory(prev => ({
+      inb: [...prev.inb.slice(1), Number((s.inMbps  || 0).toFixed(3))],
+      out: [...prev.out.slice(1), Number((s.outMbps || 0).toFixed(3))],
+    }));
+
+    // Logs
+    if (s.log && s.log.trim()) {
+      const lines = s.log.split('\n').filter(l => l.trim()).map(l => {
+        let level = 'default';
+        if (/\[FW\].*ban|drop|block/i.test(l))            level = 'error';
+        if (/\[FW\].*accept/i.test(l))                    level = 'success';
+        if (/\[SSH\].*Failed|Invalid|error/i.test(l))     level = 'error';
+        if (/\[SSH\].*Accepted/i.test(l))                 level = 'success';
+        if (/\[SSH\].*Disconnected/i.test(l))             level = 'info';
+        return { text: `[${new Date().toLocaleTimeString()}] ${l}`, level };
+      });
+      setLogs(prev => [...lines, ...prev].slice(0, 500));
+    }
+  }, []);
 
   const connect = useCallback(() => {
     if (!token || unmounted.current) return;
@@ -69,55 +180,9 @@ export function TelemetryProvider({ token, children }) {
       }
 
       if (msg.type === 'stats_update') {
-        setAgentStatus('CONNECTED');
-        const s     = msg.stats  || {};
-        const agent = msg.agent  || {};
-        setLastUpdateMs(Date.now());
-
-        setStats(prev => ({
-          ...prev,
-          connections: s.connections  ?? prev.connections,
-          bannedIPs:   s.bannedIPs    ?? prev.bannedIPs,
-          cpuPercent:  s.cpuPercent   ?? prev.cpuPercent,
-          memPercent:  s.memPercent   ?? prev.memPercent,
-          synRate:     s.synRate      ?? prev.synRate,
-          pps:         s.pps          ?? prev.pps,
-          uptime:      s.uptime       ?? prev.uptime,
-          inMbps:      s.inMbps       ?? prev.inMbps,
-          outMbps:     s.outMbps      ?? prev.outMbps,
-          hostname:    agent.hostname || prev.hostname,
-          ip:          agent.ip       || prev.ip,
-          os:          agent.os       || prev.os,
-          iface:       s.iface        || prev.iface,
-        }));
-
-        // Rolling chart data
-        setCpuHistory(prev => ({
-          cpu: [...prev.cpu.slice(1), Number((s.cpuPercent || 0).toFixed(1))],
-          mem: [...prev.mem.slice(1), Number((s.memPercent || 0).toFixed(1))],
-        }));
-
-        setNetHistory(prev => ({
-          inb: [...prev.inb.slice(1), Number((s.inMbps  || 0).toFixed(3))],
-          out: [...prev.out.slice(1), Number((s.outMbps || 0).toFixed(3))],
-        }));
-
-        // Logs
-        if (s.log && s.log.trim()) {
-          const lines = s.log.split('\n').filter(l => l.trim()).map(l => {
-            let level = 'default';
-            if (/\[FW\].*ban|drop|block/i.test(l))            level = 'error';
-            if (/\[FW\].*accept/i.test(l))                    level = 'success';
-            if (/\[SSH\].*Failed|Invalid|error/i.test(l))     level = 'error';
-            if (/\[SSH\].*Accepted/i.test(l))                 level = 'success';
-            if (/\[SSH\].*Disconnected/i.test(l))             level = 'info';
-            return { text: `[${new Date().toLocaleTimeString()}] ${l}`, level };
-          });
-          setLogs(prev => [...lines, ...prev].slice(0, 200));
-        }
+        processStatsUpdate(msg);
       }
 
-      // Command results
       if (msg.type === 'command_result') {
         const pending = pendingCmds.current.get(msg.cmdId);
         if (pending) {
@@ -135,25 +200,40 @@ export function TelemetryProvider({ token, children }) {
     ws.onclose = () => {
       if (unmounted.current) return;
       setWsState('reconnecting');
-      // Reject pending commands
       pendingCmds.current.forEach(({ reject, timeoutId }) => {
         clearTimeout(timeoutId);
         reject(new Error('Connection lost — reconnecting…'));
       });
       pendingCmds.current.clear();
-      // Exponential back-off
       const delay = Math.min(1000 * Math.pow(2, retryCount.current), 10000);
       retryCount.current += 1;
       retryTimer.current = setTimeout(connect, delay);
     };
-  }, [token]);
+  }, [token, processStatsUpdate]);
 
   useEffect(() => {
     unmounted.current = false;
     if (token) connect();
+
+    // Bootstrap: fetch last known stats from the server immediately so
+    // the dashboard is never blank on refresh (before the next WS push)
+    if (token) {
+      fetch('/api/agent/last-stats', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+        .then(r => r.json())
+        .then(d => {
+          if (d.available && !unmounted.current) {
+            processStatsUpdate({ stats: d.stats, agent: d.agent });
+          }
+        })
+        .catch(() => {});
+    }
+
     return () => {
       unmounted.current = true;
       clearTimeout(retryTimer.current);
+      clearTimeout(saveTimerRef.current);
       if (wsRef.current) {
         wsRef.current.onclose = null;
         wsRef.current.close();
@@ -165,7 +245,7 @@ export function TelemetryProvider({ token, children }) {
       });
       pendingCmds.current.clear();
     };
-  }, [connect, token]);
+  }, [connect, token, processStatsUpdate]);
 
   // ── sendCommand — shared by Terminal, Firewall, Blocklist ─────────────────
   const sendCommand = useCallback(async (cmd, { timeoutMs = 45000 } = {}) => {

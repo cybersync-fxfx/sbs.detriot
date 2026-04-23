@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale, LinearScale, PointElement,
@@ -105,10 +105,54 @@ export default function Dashboard({ token }) {
     { label: 'WebSocket',  value: wsLabel },
   ];
 
+  // ── IP/Port chip parser ───────────────────────────────────────────────────
+  const [copiedChip, setCopiedChip] = useState(null);
+  const copyTimerRef = useRef(null);
+
+  const copyChip = (text, id) => {
+    navigator.clipboard.writeText(text).catch(() => {});
+    setCopiedChip(id);
+    clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => setCopiedChip(null), 1800);
+  };
+
+  // Parse a log line and return React nodes with IP/port highlighted
+  const parseLogLine = (text, lineIdx) => {
+    // Regex: matches IPv4 addresses optionally followed by " port NNNNN" or ":NNNNN"
+    const IP_RE = /(\d{1,3}(?:\.\d{1,3}){3})(?:\s+port\s+(\d+))?/g;
+    const parts = [];
+    let last = 0;
+    let match;
+    let chipIdx = 0;
+    while ((match = IP_RE.exec(text)) !== null) {
+      if (match.index > last) parts.push(text.slice(last, match.index));
+      const ip   = match[1];
+      const port = match[2];
+      const fullText = port ? `${ip}:${port}` : ip;
+      const chipId   = `${lineIdx}-${chipIdx++}`;
+      const isCopied = copiedChip === chipId;
+      parts.push(
+        <span
+          key={chipId}
+          className={`log-ip-chip${isCopied ? ' copied' : ''}`}
+          title={`Click to copy ${fullText}`}
+          onClick={(e) => { e.stopPropagation(); copyChip(fullText, chipId); }}
+        >
+          {ip}{port && <span className="log-port-badge">:{port}</span>}
+          {isCopied && <span className="log-chip-tick">✓</span>}
+        </span>
+      );
+      last = match.index + match[0].length;
+    }
+    if (last < text.length) parts.push(text.slice(last));
+    return parts;
+  };
+
   const chartOptions = (yLabel, maxY) => ({
     responsive: true,
     maintainAspectRatio: false,
-    animation: { duration: 400, easing: 'linear' },
+    animation: { duration: 600, easing: 'easeInOutCubic' },
+    transitions: { active: { animation: { duration: 300 } } },
     plugins: {
       legend: { labels: { color: '#64748b', font: { family: 'JetBrains Mono', size: 11 } } }
     },
@@ -237,7 +281,9 @@ export default function Dashboard({ token }) {
           {logs.length === 0
             ? <div className="empty-state">Waiting for agent log stream — SSH &amp; firewall events will appear here…</div>
             : logs.map((log, idx) => (
-                <div key={idx} className={`log-line ${log.level}`}>{log.text}</div>
+                <div key={idx} className={`log-line ${log.level}`}>
+                  {parseLogLine(log.text, idx)}
+                </div>
               ))
           }
         </div>

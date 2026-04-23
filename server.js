@@ -587,6 +587,15 @@ app.post('/api/agent/stats', agentAuthMiddleware, (req, res) => {
   });
   
   const stats = req.body;
+
+  // Cache the latest stats per user so the frontend can fetch them on page load
+  if (!db.lastStats) db.lastStats = {};
+  db.lastStats[req.user.id] = {
+    stats,
+    agent: { hostname: agent.hostname || '-', ip: agent.ip || '-', os: agent.os || 'Ubuntu' },
+    savedAt: Date.now(),
+  };
+
   broadcastToUser(req.user.id, {
     type: 'stats_update',
     stats,
@@ -599,6 +608,15 @@ app.post('/api/agent/stats', agentAuthMiddleware, (req, res) => {
     }
   });
   res.json({ success: true });
+});
+
+// Frontend can call this on page load to get the last known stats immediately
+app.get('/api/agent/last-stats', authMiddleware, (req, res) => {
+  const cached = db.lastStats?.[req.user.id];
+  if (!cached) return res.json({ available: false });
+  // Only return if agent sent stats within the last 30 seconds
+  if (Date.now() - cached.savedAt > 30000) return res.json({ available: false });
+  res.json({ available: true, ...cached });
 });
 
 app.get('/api/agent/commands', agentAuthMiddleware, (req, res) => {
