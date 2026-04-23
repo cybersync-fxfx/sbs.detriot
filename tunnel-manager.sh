@@ -4,33 +4,40 @@ AGENT_ID=$2
 CLIENT_IP=$3
 GUARD_IP=$(curl -s ifconfig.me)
 
+# Configuration
+TUNNEL_NAME="gre_${AGENT_ID:0:8}"
+GUARD_INTERNAL_IP="10.0.0.1"
+CLIENT_INTERNAL_IP="10.0.0.2"
+
 case $ACTION in
   add)
-    # Create GRE tunnel to client
-    ip tunnel add gre_${AGENT_ID} mode gre \
+    echo "Creating GRE tunnel to client ${CLIENT_IP}..."
+    
+    # 1. Enable IP Forwarding
+    sysctl -w net.ipv4.ip_forward=1 > /dev/null
+
+    # 2. Create GRE tunnel
+    ip tunnel add ${TUNNEL_NAME} mode gre \
       remote ${CLIENT_IP} \
       local ${GUARD_IP} \
       ttl 255 2>/dev/null || true
-    ip link set gre_${AGENT_ID} up 2>/dev/null || true
+    
+    ip addr add ${GUARD_INTERNAL_IP}/30 dev ${TUNNEL_NAME} 2>/dev/null || true
+    ip link set ${TUNNEL_NAME} up 2>/dev/null || true
 
-    # Enable NAT masquerade through tunnel
-    iptables -t nat -A POSTROUTING \
-      -o gre_${AGENT_ID} -j MASQUERADE 2>/dev/null || true
+    # 3. NAT/Forwarding rules
+    # Allow traffic to be forwarded from the tunnel to the internet
+    iptables -t nat -A POSTROUTING -s ${CLIENT_INTERNAL_IP} -j MASQUERADE 2>/dev/null || true
+    iptables -A FORWARD -i ${TUNNEL_NAME} -j ACCEPT 2>/dev/null || true
+    iptables -A FORWARD -o ${TUNNEL_NAME} -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
 
-    # Forward traffic through tunnel
-    iptables -A FORWARD \
-      -i gre_${AGENT_ID} -j ACCEPT 2>/dev/null || true
-    iptables -A FORWARD \
-      -o gre_${AGENT_ID} -j ACCEPT 2>/dev/null || true
-
-    echo "{ \"status\": \"ok\", \"tunnel\": \"gre_${AGENT_ID}\" }"
+    echo "{ \"status\": \"ok\", \"tunnel\": \"${TUNNEL_NAME}\", \"guard_ip\": \"${GUARD_INTERNAL_IP}\", \"client_ip\": \"${CLIENT_INTERNAL_IP}\" }"
     ;;
 
   remove)
-    ip link set gre_${AGENT_ID} down 2>/dev/null || true
-    ip tunnel del gre_${AGENT_ID} 2>/dev/null || true
-    iptables -t nat -D POSTROUTING \
-      -o gre_${AGENT_ID} -j MASQUERADE 2>/dev/null || true
+    ip link set ${TUNNEL_NAME} down 2>/dev/null || true
+    ip tunnel del ${TUNNEL_NAME} 2>/dev/null || true
+    iptables -t nat -D POSTROUTING -s ${CLIENT_INTERNAL_IP} -j MASQUERADE 2>/dev/null || true
     echo "{ \"status\": \"ok\", \"tunnel\": \"removed\" }"
     ;;
 

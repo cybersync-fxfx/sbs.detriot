@@ -247,7 +247,9 @@ export default function Dashboard({ token }) {
               <div key={item.label} className="fact-row">
                 <span>{item.label}</span>
                 <span className={`fact-value ${
-                  (item.label === 'Tunnel' && tunnelStatus !== 'active') ? 'danger' :
+                  (item.label === 'Tunnel' && tunnelStatus === 'active') ? 'success' :
+                  (item.label === 'Tunnel' && tunnelStatus === 'degraded') ? 'warning' :
+                  (item.label === 'Tunnel' && tunnelStatus === 'inactive') ? 'danger' :
                   (item.label === 'WebSocket' && wsState !== 'open') ? 'danger' : ''
                 }`}>{item.value}</span>
               </div>

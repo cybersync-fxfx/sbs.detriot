@@ -670,11 +670,40 @@ app.post('/api/agent/tunnel/create', agentAuthMiddleware, privilegedSupabaseMidd
 
   try {
     const { execSync } = require('child_process');
-    // Using bash to run the script since the app might not run as root.
-    // NOTE: In production, ensure the node process has sudo privileges for this script without password
+    const guardPubIp = execSync('curl -s https://api.ipify.org || curl -s ifconfig.me').toString().trim();
+    
+    // 1. Setup Guard side
+    console.log(`[tunnel] Setting up guard for agent ${agentId} at ${clientIp}...`);
     execSync(`sudo /opt/detroit-sbs/tunnel-manager.sh add ${agentId} ${clientIp}`);
     
-    // Update Supabase
+    // 2. Queue command for Client side
+    if (!commandQueue[agentId]) commandQueue[agentId] = [];
+    
+    // Construct the command to setup the client tunnel
+    // We use a one-liner to create the GRE tunnel on the client
+    const tunnelName = `gre_${agentId.substring(0, 8)}`;
+    const clientCmd = `
+      ip tunnel del ${tunnelName} 2>/dev/null || true;
+      ip tunnel add ${tunnelName} mode gre remote ${guardPubIp} local $(curl -s ifconfig.me || ip route get 1.1.1.1 | grep -oP 'src \\K\\S+') ttl 255;
+      ip addr add 10.0.0.2/30 dev ${tunnelName} 2>/dev/null || true;
+      ip link set ${tunnelName} up;
+      
+      # Routing
+      ip route add 10.0.0.1 dev ${tunnelName} 2>/dev/null || true;
+      
+      # Block direct access - allow only from tunnel and guard IP
+      # We allow SSH (22) from everywhere for safety, but drop 80/443 on public interface
+      if command -v nft >/dev/null; then
+        echo "flush ruleset; table inet sbs_filter { chain input { type filter hook input priority 0; policy accept; ct state established,related accept; iif lo accept; ip saddr ${guardPubIp} ip protocol gre accept; tcp dport 22 accept; iifname \\"${tunnelName}\\" accept; iifname != \\"${tunnelName}\\" tcp dport { 80, 443 } drop; } }" > /etc/nftables.conf;
+        nft -f /etc/nftables.conf;
+      fi
+      
+      echo "Tunnel ${tunnelName} established to ${guardPubIp} with direct access restricted";
+    `.replace(/\n/g, ' ').trim();
+
+    commandQueue[agentId].push({ id: crypto.randomUUID(), cmd: clientCmd });
+
+    // 3. Update Supabase
     await supabaseAdmin.from('user_profiles')
       .update({ 
         tunnel_status: 'active', 
@@ -683,10 +712,10 @@ app.post('/api/agent/tunnel/create', agentAuthMiddleware, privilegedSupabaseMidd
       })
       .eq('agent_id', agentId);
 
-    res.json({ success: true });
+    res.json({ success: true, guardIp: guardPubIp });
   } catch (err) {
     console.error('Tunnel creation failed:', err.message);
-    res.status(500).json({ error: 'Tunnel creation failed' });
+    res.status(500).json({ error: 'Tunnel creation failed: ' + err.message });
   }
 });
 
@@ -712,14 +741,48 @@ app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddlew
 app.get('/api/agent/tunnel/status', authMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
   const { agent_id } = req.user;
   try {
-    const { data } = await supabaseAdmin.from('user_profiles').select('tunnel_status').eq('agent_id', agent_id).single();
-    res.json({ status: data?.tunnel_status || 'inactive' });
+    const { data } = await supabaseAdmin.from('user_profiles').select('tunnel_status, client_ip').eq('agent_id', agent_id).single();
+    let status = data?.tunnel_status || 'inactive';
+
+    // If active, perform a quick reachability check via internal IP
+    if (status === 'active') {
+      try {
+        const { execSync } = require('child_process');
+        // Ping the client internal IP (10.0.0.2)
+        execSync('ping -c 1 -W 1 10.0.0.2', { stdio: 'ignore' });
+      } catch (e) {
+        // If ping fails, the tunnel might be down but we'll still report 'active' (yellow state?)
+        // Or we could report 'error'
+        status = 'degraded'; 
+      }
+    }
+
+    res.json({ status });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch status' });
   }
 });
 
-// Websocket logic
+// ── Radar Scanner Integration ────────────────────────────────
+const RadarScanner = require('./radar-scanner');
+const radar = new RadarScanner(supabaseAdmin, broadcastToUser);
+radar.start();
+
+// ── Global Blocklist Sync ────────────────────────────────────
+function broadcastGlobalBan(ip) {
+  // Broadcast to all connected agents
+  const banMessage = JSON.stringify({ type: 'global_ban', ip });
+  Object.keys(db.agents).forEach(agentId => {
+    if (!commandQueue[agentId]) commandQueue[agentId] = [];
+    commandQueue[agentId].push({ 
+      id: crypto.randomUUID(), 
+      cmd: `nft add element inet sbs_filter blacklist { ${ip} } 2>/dev/null || nft add element inet detroit_guard blacklist { ${ip} }`
+    });
+  });
+  console.log(`[global-ban] Syncing ${ip} to all agents.`);
+}
+
+// ── Websocket logic ──────────────────────────────────────────
 const clients = {}; // { userId: [ws1, ws2] }
 
 wss.on('connection', async (ws, req) => {
@@ -764,7 +827,19 @@ function broadcastToUser(userId, message) {
   }
 }
 
-// Agent Heartbeat Checker
+// Global broadcast (to all dashboards)
+function broadcastToAll(message) {
+  const msg = JSON.stringify(message);
+  Object.values(clients).forEach(userClients => {
+    userClients.forEach(ws => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(msg);
+      }
+    });
+  });
+}
+
+// ── Agent Heartbeat Checker ──────────────────────────────────
 setInterval(() => {
   const now = Date.now();
   for (const [agentId, agent] of Object.entries(db.agents)) {
@@ -777,6 +852,7 @@ setInterval(() => {
   }
 }, 5000);
 
+// Health & Internal endpoints
 app.get('/api/internal/agents', (req, res) => {
   const clientIp = req.socket.remoteAddress;
   if (clientIp !== '127.0.0.1' && clientIp !== '::1' && clientIp !== '::ffff:127.0.0.1') {
@@ -789,42 +865,37 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true });
 });
 
+// Threat Radar API
+app.get('/api/radar/stats', authMiddleware, async (req, res) => {
+  try {
+    const { data: recent } = await supabaseAdmin
+      .from('threat_radar')
+      .select('*')
+      .order('detected_at', { ascending: false })
+      .limit(50);
+      
+    const { count: scannedToday } = await supabaseAdmin
+      .from('threat_radar')
+      .select('*', { count: 'exact', head: true })
+      .gte('detected_at', new Date(Date.now() - 86400000).toISOString());
+
+    const { count: blockedToday } = await supabaseAdmin
+      .from('threat_radar')
+      .select('*', { count: 'exact', head: true })
+      .eq('action', 'banned')
+      .gte('detected_at', new Date(Date.now() - 86400000).toISOString());
+
+    res.json({ recent, stats: { scannedToday, blockedToday } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Catch all for SPA
 app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'frontend', 'dist', 'index.html'));
 });
 
 server.listen(PORT, () => {
-  const asciiArt = `
-\x1b[36m ____       _             _ _     \x1b[35m____  ____  ____  \x1b[0m
-\x1b[36m|  _ \\  ___| |_ _ __ ___ (_) |_  \x1b[35m/ ___|| __ )/ ___| \x1b[0m
-\x1b[36m| | | |/ _ \\ __| '__/ _ \\| | __| \x1b[35m\\___ \\|  _ \\\\___ \\ \x1b[0m
-\x1b[36m| |_| |  __/ |_| | | (_) | | |_   \x1b[35m___) | |_) |___) |\x1b[0m
-\x1b[36m|____/ \\___|\\__|_|  \\___/|_|\\__| \x1b[35m|____/|____/|____/ \x1b[0m
-`;
-
-  console.clear();
-  console.log(asciiArt);
-  console.log('\x1b[1m\x1b[32m=== DETROIT SBS SERVER INITIATED ===\x1b[0m\n');
-  console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mServer HTTP:\x1b[0m   \x1b[36mhttp://localhost:${PORT}\x1b[0m`);
-  console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mWebSocket:\x1b[0m     \x1b[36mws://localhost:${PORT}\x1b[0m`);
-  
-  if (SUPABASE_URL) {
-    try {
-      const dbUrlHost = new URL(SUPABASE_URL).hostname;
-      console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mDatabase:\x1b[0m      \x1b[32mConnected\x1b[0m \x1b[90m(${dbUrlHost})\x1b[0m`);
-    } catch(e) {
-      console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mDatabase:\x1b[0m      \x1b[32mConnected\x1b[0m`);
-    }
-  } else {
-    console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mDatabase:\x1b[0m      \x1b[31mDisconnected\x1b[0m`);
-  }
-  
-  if (ADMIN_FEATURES_ENABLED) {
-    console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mAdmin Status:\x1b[0m  \x1b[32mActive (Service key present)\x1b[0m`);
-  } else {
-    console.log(`\x1b[1m\x1b[34m[➔]\x1b[0m \x1b[1mAdmin Status:\x1b[0m  \x1b[33mInactive (Missing SUPABASE_SERVICE_KEY / SUPABASE_SERVICE_ROLE_KEY)\x1b[0m`);
-  }
-
-  console.log('\n\x1b[1m\x1b[33m[!] Waiting for connections...\x1b[0m\n');
+  console.log(`\x1b[32m[✓] SBS Detroit Server listening on port ${PORT}\x1b[0m`);
 });

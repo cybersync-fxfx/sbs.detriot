@@ -663,6 +663,8 @@ button.danger:hover:not(:disabled) {
   word-break: break-word;
 }
 .fact-value.danger { color: var(--danger-red); }
+.fact-value.success { color: var(--success-green); text-shadow: 0 0 8px var(--success-glow); }
+.fact-value.warning { color: var(--warn-amber); }
 
 /* Terminal */
 .terminal-log {

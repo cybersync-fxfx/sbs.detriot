@@ -11,6 +11,7 @@ import Blocklist from './pages/Blocklist';
 import Install   from './pages/Install';
 import ApiKeys   from './pages/ApiKeys';
 import Settings  from './pages/Settings';
+import ThreatRadar from './pages/ThreatRadar';
 
 function App() {
   const [token,   setToken]   = useState(localStorage.getItem('sbs_token'));
@@ -108,6 +109,7 @@ function App() {
             <Route path="/install"   element={<Install   token={token} user={user} />} />
             <Route path="/apikeys"   element={<ApiKeys   token={token} user={user} setUser={setUser} />} />
             <Route path="/settings"  element={<Settings  token={token} user={user} />} />
+            <Route path="/radar"     element={<ThreatRadar token={token} />} />
             <Route path="*"          element={<Navigate to="/" />} />
           </Route>
         )}
