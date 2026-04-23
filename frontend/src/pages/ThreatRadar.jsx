@@ -121,7 +121,7 @@ export default function ThreatRadar({ token }) {
               />
             </div>
             <div className="fact-row">
-              <span>AbuseIPDB Sync</span>
+              <span>Internal Sync</span>
               <span className="text-green">Active</span>
             </div>
             <div className="fact-row">

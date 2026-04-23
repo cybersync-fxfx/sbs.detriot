@@ -1,8 +1,6 @@
 const { execSync } = require('child_process');
-const axios = require('axios');
 require('dotenv').config();
 
-const ABUSEIPDB_KEY = process.env.ABUSEIPDB_KEY;
 const BAN_THRESHOLD = 75;
 
 /**
@@ -63,7 +61,6 @@ class RadarScanner {
   async scoreIP(ip, connCount) {
     let score = 0;
     let reasons = [];
-    let abuseScore = 0;
 
     // A. Connection count scoring
     if (connCount > 100) {
@@ -71,7 +68,7 @@ class RadarScanner {
       reasons.push(`${connCount} connections`);
     }
     if (connCount > 500) {
-      score += 40;
+      score += 50;
       reasons.push('Extreme connection count');
     }
 
@@ -79,33 +76,12 @@ class RadarScanner {
     try {
       const synCount = parseInt(execSync(`ss -ant | grep SYN-RECV | grep ${ip} | wc -l`).toString());
       if (synCount > 50) {
-        score += 35;
+        score += 40;
         reasons.push('High SYN-RECV rate');
       }
     } catch (e) {}
 
-    // C. AbuseIPDB check (if key available)
-    if (ABUSEIPDB_KEY) {
-      try {
-        const response = await axios.get('https://api.abuseipdb.com/api/v2/check', {
-          params: { ipAddress: ip, maxAgeInDays: 90 },
-          headers: { Key: ABUSEIPDB_KEY, Accept: 'application/json' }
-        });
-        abuseScore = response.data.data.abuseConfidenceScore;
-        if (abuseScore > 50) {
-          score += 20;
-          reasons.push(`AbuseIPDB Score: ${abuseScore}`);
-        }
-        if (abuseScore > 80) {
-          score += 30; // Push to auto-ban
-          reasons.push('Confirmed high-threat IP');
-        }
-      } catch (e) {
-        // console.error('[Radar] AbuseIPDB error for', ip, e.message);
-      }
-    }
-
-    // D. Check our own history
+    // C. Check our own history
     try {
       const { data } = await this.supabaseAdmin
         .from('threat_radar')
@@ -115,23 +91,19 @@ class RadarScanner {
         .limit(1);
       
       if (data && data.length > 0) {
-        score += 30;
+        score += 35;
         reasons.push('Repeat offender');
       }
     } catch (e) {}
 
-    return { score, reasons, abuseScore };
+    return { score, reasons, abuseScore: 0 };
   }
 
   async logThreat(ip, score, reason, action, abuseScore) {
     try {
       await this.supabaseAdmin.from('threat_radar').insert({
-        ip, score, reason, action, abuseipdb_score: abuseScore
+        ip, score, reason, action, abuseipdb_score: 0
       });
-      
-      // Broadcast live to all users
-      // Note: We need a way to find all connected users. 
-      // For now we'll assume we can broadcast globally or it will be picked up by the next dashboard poll.
     } catch (e) {
       console.error('[Radar] DB Log error:', e.message);
     }
