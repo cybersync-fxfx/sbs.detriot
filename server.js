@@ -409,7 +409,7 @@ function sendStats() {
       "ss -ant | wc -l; " +
       "ss -ant | grep ESTAB | wc -l; " +
       "ss -ant | grep SYN-RECV | wc -l; " +
-      "NFT_TABLE=$(nft list table inet sbs_filter 2>/dev/null && echo 'inet sbs_filter' || echo 'inet detroit_guard'); " +
+      "NFT_TABLE='inet detroit_guard'; " +
       "nft list set $NFT_TABLE blacklist 2>/dev/null | grep -oE '([0-9]{1,3}\\.){3}[0-9]{1,3}' | wc -l; " +
       "free | grep Mem | awk '{print $3/$2 * 100}'; " +
       "cat /proc/uptime | awk '{print $1}'; " +
@@ -794,7 +794,7 @@ function broadcastGlobalBan(ip) {
     if (!commandQueue[agentId]) commandQueue[agentId] = [];
     commandQueue[agentId].push({ 
       id: crypto.randomUUID(), 
-      cmd: `nft add element inet sbs_filter blacklist { ${ip} } 2>/dev/null || nft add element inet detroit_guard blacklist { ${ip} }`
+      cmd: `nft add element inet detroit_guard blacklist { ${ip} } 2>/dev/null || true`
     });
   });
   console.log(`[global-ban] Syncing ${ip} to all agents.`);

@@ -167,7 +167,7 @@ class RadarScanner {
       console.log(`[Radar] BANNING IP: ${ip} | Reason: ${reason}`);
       
       // 1. Ban locally on Guard
-      execSync(`sudo nft add element inet sbs_filter blacklist { ${ip} } 2>/dev/null || sudo nft add element inet detroit_guard blacklist { ${ip} }`);
+      execSync(`sudo nft add element inet detroit_guard blacklist { ${ip} } 2>/dev/null || true`);
 
       // 2. Save to global blocklist
       // (This should be picked up by agents or broadcast via WS)

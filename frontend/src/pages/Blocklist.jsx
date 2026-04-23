@@ -3,8 +3,8 @@ import { useTelemetry } from '../context/TelemetryContext';
 
 const ipv4Pattern = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 
-// Auto-detects whichever nftables table this server uses
-const NFT_DETECT = `NFT_TABLE=$(nft list table inet sbs_filter 2>/dev/null && echo "inet sbs_filter" || echo "inet detroit_guard")`;
+// Standardized nftables table for Detroit SBS
+const NFT_DETECT = `NFT_TABLE='inet detroit_guard'`;
 
 function extractBlockedIps(output) {
   const matches = output.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g);
