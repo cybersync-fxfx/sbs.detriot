@@ -112,6 +112,64 @@ export default function Dashboard({ token }) {
     { label: 'Memory',            value: `${(stats.memPercent || 0).toFixed(1)}%`, tone: 'red' },
   ];
 
+  const handleCreateTunnel = async () => {
+    try {
+      const res = await fetch('/api/agent/tunnel/create', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (res.ok) {
+        alert('Tunnel creation initiated! The agent will receive the command shortly.');
+        fetchTunnelStatus();
+      } else {
+        const err = await res.json();
+        alert('Failed: ' + (err.error || 'Unknown error'));
+      }
+    } catch (e) {
+      alert('Error connecting to server.');
+    }
+  };
+
+  const getTunnelDisplay = () => {
+    if (tunnelStatus === 'inactive') {
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span className="fact-value danger">inactive</span>
+          <button 
+            className="secondary-button" 
+            style={{ 
+              padding: '2px 10px', 
+              fontSize: '0.62rem', 
+              height: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              background: 'rgba(239,68,68,0.1)', 
+              border: '1px solid rgba(239,68,68,0.3)', 
+              color: '#ef4444', 
+              cursor: 'pointer',
+              fontWeight: '700',
+              letterSpacing: '0.05em',
+              borderRadius: '2px'
+            }}
+            onClick={handleCreateTunnel}
+          >
+            SETUP TUNNEL
+          </button>
+        </div>
+      );
+    }
+    return (
+      <span className={`fact-value ${
+        tunnelStatus === 'active' ? 'success' : 'warning'
+      }`}>
+        {tunnelStatus}
+      </span>
+    );
+  };
+
   const agentFacts = [
     { label: 'Hostname',   value: stats.hostname },
     { label: 'IP Address', value: stats.ip },
@@ -121,7 +179,7 @@ export default function Dashboard({ token }) {
     { label: 'In (Mbps)',  value: stats.inMbps.toFixed(3) },
     { label: 'Out (Mbps)', value: stats.outMbps.toFixed(3) },
     { label: 'SYN Rate',   value: stats.synRate },
-    { label: 'Tunnel',     value: tunnelStatus === 'loading' ? '...' : tunnelStatus },
+    { label: 'Tunnel',     value: getTunnelDisplay() },
     { label: 'Guard Host', value: window.location.hostname },
     { label: 'Telemetry',  value: telemetryLabel },
     { label: 'WebSocket',  value: wsLabel },
@@ -246,12 +304,16 @@ export default function Dashboard({ token }) {
             {agentFacts.map(item => (
               <div key={item.label} className="fact-row">
                 <span>{item.label}</span>
-                <span className={`fact-value ${
-                  (item.label === 'Tunnel' && tunnelStatus === 'active') ? 'success' :
-                  (item.label === 'Tunnel' && tunnelStatus === 'degraded') ? 'warning' :
-                  (item.label === 'Tunnel' && tunnelStatus === 'inactive') ? 'danger' :
-                  (item.label === 'WebSocket' && wsState !== 'open') ? 'danger' : ''
-                }`}>{item.value}</span>
+                {typeof item.value === 'string' || typeof item.value === 'number' ? (
+                  <span className={`fact-value ${
+                    (item.label === 'Tunnel' && tunnelStatus === 'active') ? 'success' :
+                    (item.label === 'Tunnel' && tunnelStatus === 'degraded') ? 'warning' :
+                    (item.label === 'Tunnel' && tunnelStatus === 'inactive') ? 'danger' :
+                    (item.label === 'WebSocket' && wsState !== 'open') ? 'danger' : ''
+                  }`}>{item.value}</span>
+                ) : (
+                  item.value
+                )}
               </div>
             ))}
           </div>
