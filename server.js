@@ -129,8 +129,8 @@ const privilegedSupabaseMiddleware = (req, res, next) => {
 };
 
 const agentAuthMiddleware = async (req, res, next) => {
-  const agentId = req.body.agentId || req.query.agentId;
-  const apiKey = req.body.apiKey || req.query.apiKey;
+  const agentId = req.body?.agentId || req.query?.agentId;
+  const apiKey = req.body?.apiKey || req.query?.apiKey;
   if (!agentId || !apiKey) return res.status(401).json({ error: 'Missing agent credentials' });
   
   // Call the Supabase RPC function (Security Definer) to securely verify the API key
