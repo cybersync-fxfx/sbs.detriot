@@ -130,8 +130,7 @@ function sendStats() {
       "nft list set $NFT_TABLE blacklist 2>/dev/null | grep -oE '([0-9]{1,3}\\.){3}[0-9]{1,3}' | wc -l; " +
       "free | grep Mem | awk '{print $3/$2 * 100}'; " +
       "cat /proc/uptime | awk '{print $1}'; " +
-      "ss -anu | wc -l; " +
-      "grep -E 'Accepted|Failed|Invalid|Disconnected' /var/log/auth.log 2>/dev/null | tail -n 20 || " + +
+      "grep -E 'Accepted|Failed|Invalid|Disconnected' /var/log/auth.log 2>/dev/null | tail -n 20 || " +
       "grep -E 'Accepted|Failed|Invalid|Disconnected' /var/log/secure 2>/dev/null | tail -n 20 || echo ''; " +
       "echo '---ATTACKS---'; " +
       "tail -n 10 /var/log/sbs/attacks.log 2>/dev/null || echo ''",

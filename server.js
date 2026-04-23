@@ -504,7 +504,7 @@ cat << 'EOF' > /etc/nftables.conf
 #!/usr/sbin/nft -f
 flush ruleset
 
-table inet sbs_filter {
+table inet detroit_guard {
   set blacklist {
     type ipv4_addr
     flags timeout

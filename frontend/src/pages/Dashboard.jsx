@@ -30,13 +30,16 @@ export default function Dashboard({ token }) {
     return () => clearInterval(id);
   }, [lastUpdateMs]);
 
-  // ── Tunnel status ────────────────────────────────────────────────────────
-  useEffect(() => {
+  const fetchTunnelStatus = () => {
     if (!token) return;
     fetch('/api/agent/tunnel/status', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => setTunnelStatus(d.status || 'inactive'))
       .catch(() => setTunnelStatus('inactive'));
+  };
+
+  useEffect(() => {
+    fetchTunnelStatus();
   }, [token]);
 
   // ── Build chart data objects from context history ─────────────────────────
