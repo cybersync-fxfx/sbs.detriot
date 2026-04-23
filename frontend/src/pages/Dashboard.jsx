@@ -20,6 +20,7 @@ export default function Dashboard({ token }) {
   const [graphTab, setGraphTab] = useState('bandwidth'); // 'bandwidth' | 'tcp' | 'udp'
 
   const [tunnelStatus, setTunnelStatus] = useState('loading');
+  const [tunnelMeta,   setTunnelMeta]   = useState(null);
   const [ageSec,       setAgeSec]       = useState(null);
 
   // ── Live telemetry age ticker ────────────────────────────────────────────
@@ -34,19 +35,28 @@ export default function Dashboard({ token }) {
     if (!token) return;
     console.log('[Tunnel] Fetching status...');
     fetch('/api/agent/tunnel/status', { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
+      .then(async (r) => {
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Unable to load tunnel status.');
+        return data;
+      })
       .then(d => {
         console.log('[Tunnel] Status received:', d);
         setTunnelStatus(d.status || 'inactive');
+        setTunnelMeta(d);
       })
       .catch((err) => {
         console.error('[Tunnel] Status fetch failed:', err);
         setTunnelStatus('inactive');
+        setTunnelMeta(null);
       });
   };
 
   useEffect(() => {
     fetchTunnelStatus();
+    if (!token) return undefined;
+    const id = setInterval(fetchTunnelStatus, 10000);
+    return () => clearInterval(id);
   }, [token]);
 
   // ── Build chart data objects from context history ─────────────────────────
@@ -136,7 +146,7 @@ export default function Dashboard({ token }) {
       console.log('[Tunnel] Creation response:', res.status, data);
 
       if (res.ok) {
-        alert('Tunnel creation initiated! The agent will receive the command shortly.');
+        alert('Tunnel creation initiated. Guard-side setup has started and the connected agent has been queued for client-side tunnel setup.');
         fetchTunnelStatus();
       } else {
         alert('Failed: ' + (data.error || 'Unknown error'));
@@ -197,6 +207,7 @@ export default function Dashboard({ token }) {
     { label: 'Guard Host', value: window.location.hostname },
     { label: 'Telemetry',  value: telemetryLabel },
     { label: 'WebSocket',  value: wsLabel },
+    { label: 'Tunnel Sync', value: tunnelMeta?.syncMismatch ? 'DB out of sync' : 'OK' },
   ];
 
   // ── IP/Port chip parser ───────────────────────────────────────────────────

@@ -8,17 +8,23 @@ export default function Settings({ token, user }) {
   useEffect(() => {
     if (!token) return;
 
-    fetch('/api/agent/tunnel/status', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-      .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(data.error || 'Unable to load tunnel status.');
-        }
-        setTunnelStatus(data.status || 'inactive');
+    const fetchStatus = () => {
+      fetch('/api/agent/tunnel/status', {
+        headers: { 'Authorization': `Bearer ${token}` }
       })
-      .catch((error) => setFeedback(error.message));
+        .then(async (response) => {
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.error || 'Unable to load tunnel status.');
+          }
+          setTunnelStatus(data.status || 'inactive');
+        })
+        .catch((error) => setFeedback(error.message));
+    };
+
+    fetchStatus();
+    const id = setInterval(fetchStatus, 10000);
+    return () => clearInterval(id);
   }, [token]);
 
   const handleRemoveTunnel = async () => {

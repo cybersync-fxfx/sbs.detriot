@@ -106,7 +106,7 @@ NFTEOF
 # Load the threat lists into nftables
 systemctl restart nftables
 cat /opt/detroit-sbs/threat-lists/*.txt | sort -u | while read ip; do
-  nft add element inet detroit_guard threat_intel { $ip } 2>/dev/null
+  nft add element inet detroit_guard threat_intel "{ $ip }" 2>/dev/null
 done
 
 echo -e "${BLUE}[4/6] Setting up Automatic Threat List Sync (Cron)...${RESET}"
@@ -117,7 +117,7 @@ curl -s https://www.spamhaus.org/drop/drop.txt | grep -oE '([0-9]{1,3}\.){3}[0-9
 # Flush and reload set
 nft flush set inet detroit_guard threat_intel
 cat /opt/detroit-sbs/threat-lists/*.txt | sort -u | while read ip; do
-  nft add element inet detroit_guard threat_intel { $ip } 2>/dev/null
+  nft add element inet detroit_guard threat_intel "{ $ip }" 2>/dev/null
 done
 CRONEOF
 chmod +x /etc/cron.daily/sbs-sync-threats

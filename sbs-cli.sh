@@ -146,7 +146,7 @@ if [ "$1" = "--ban" ]; then
   fi
 
   echo -e "${YELLOW}[→] Banning $IP in $NFT_TABLE $NFT_SET ...${RESET}"
-  OUTPUT=$(nft add element $NFT_TABLE $NFT_SET { $IP } 2>&1)
+  OUTPUT=$(nft add element $NFT_TABLE $NFT_SET "{ $IP }" 2>&1)
   EXIT=$?
 
   if [ $EXIT -ne 0 ]; then
@@ -183,7 +183,7 @@ if [ "$1" = "--unban" ]; then
   fi
 
   echo -e "${YELLOW}[→] Unbanning $IP from $NFT_TABLE $NFT_SET ...${RESET}"
-  OUTPUT=$(nft delete element $NFT_TABLE $NFT_SET { $IP } 2>&1)
+  OUTPUT=$(nft delete element $NFT_TABLE $NFT_SET "{ $IP }" 2>&1)
   EXIT=$?
 
   if [ $EXIT -ne 0 ]; then

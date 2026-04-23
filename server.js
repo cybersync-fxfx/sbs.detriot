@@ -741,6 +741,22 @@ async function setupTunnel(req, res, agentId, clientIp) {
   }
 }
 
+function getTunnelInterfaceName(agentId) {
+  return `gre_${String(agentId || '').substring(0, 8)}`;
+}
+
+function readGuardTunnelState(agentId) {
+  const tunnelName = getTunnelInterfaceName(agentId);
+
+  try {
+    const { execSync } = require('child_process');
+    const linkInfo = execSync(`ip -o link show ${tunnelName}`).toString().trim();
+    return { exists: true, tunnelName, linkInfo };
+  } catch (err) {
+    return { exists: false, tunnelName, linkInfo: null };
+  }
+}
+
 app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
   const { agent_id } = req.user;
   
@@ -764,22 +780,26 @@ app.get('/api/agent/tunnel/status', authMiddleware, privilegedSupabaseMiddleware
   const { agent_id } = req.user;
   try {
     const { data } = await supabaseAdmin.from('user_profiles').select('tunnel_status, client_ip').eq('agent_id', agent_id).single();
-    let status = data?.tunnel_status || 'inactive';
+    const dbStatus = data?.tunnel_status || 'inactive';
+    const systemState = readGuardTunnelState(agent_id);
+    let status = dbStatus;
 
-    // If active, perform a quick reachability check via internal IP
-    if (status === 'active') {
-      try {
-        const { execSync } = require('child_process');
-        // Ping the client internal IP (10.0.0.2)
-        execSync('ping -c 1 -W 1 10.0.0.2', { stdio: 'ignore' });
-      } catch (e) {
-        // If ping fails, the tunnel might be down but we'll still report 'active' (yellow state?)
-        // Or we could report 'error'
-        status = 'degraded'; 
-      }
+    if (systemState.exists) {
+      status = 'active';
+    } else if (dbStatus === 'active') {
+      status = 'degraded';
+    } else {
+      status = 'inactive';
     }
 
-    res.json({ status });
+    res.json({
+      status,
+      dbStatus,
+      clientIp: data?.client_ip || null,
+      tunnelName: systemState.tunnelName,
+      guardInterfacePresent: systemState.exists,
+      syncMismatch: systemState.exists && dbStatus === 'inactive',
+    });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch status' });
   }
@@ -793,12 +813,11 @@ radar.start();
 // ── Global Blocklist Sync ────────────────────────────────────
 function broadcastGlobalBan(ip) {
   // Broadcast to all connected agents
-  const banMessage = JSON.stringify({ type: 'global_ban', ip });
   Object.keys(db.agents).forEach(agentId => {
     if (!commandQueue[agentId]) commandQueue[agentId] = [];
     commandQueue[agentId].push({ 
       id: crypto.randomUUID(), 
-      cmd: `nft add element inet detroit_guard blacklist { ${ip} } 2>/dev/null || true`
+      cmd: `nft add element inet detroit_guard blacklist '{ ${ip} }' 2>/dev/null || true`
     });
   });
   console.log(`[global-ban] Syncing ${ip} to all agents.`);
