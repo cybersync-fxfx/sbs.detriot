@@ -130,7 +130,8 @@ function sendStats() {
       "nft list set $NFT_TABLE blacklist 2>/dev/null | grep -oE '([0-9]{1,3}\\.){3}[0-9]{1,3}' | wc -l; " +
       "free | grep Mem | awk '{print $3/$2 * 100}'; " +
       "cat /proc/uptime | awk '{print $1}'; " +
-      "grep -E 'Accepted|Failed|Invalid|Disconnected' /var/log/auth.log 2>/dev/null | tail -n 20 || " +
+      "ss -anu | wc -l; " +
+      "grep -E 'Accepted|Failed|Invalid|Disconnected' /var/log/auth.log 2>/dev/null | tail -n 20 || " + +
       "grep -E 'Accepted|Failed|Invalid|Disconnected' /var/log/secure 2>/dev/null | tail -n 20 || echo ''; " +
       "echo '---ATTACKS---'; " +
       "tail -n 10 /var/log/sbs/attacks.log 2>/dev/null || echo ''",
@@ -144,7 +145,7 @@ function sendStats() {
         lastCpu=curCpu;
 
         const sep=lines.findIndex(l=>l.includes('---ATTACKS---'));
-        const sshLines=lines.slice(6,sep>=0?sep:lines.length);
+        const sshLines=lines.slice(7,sep>=0?sep:lines.length);
         const atkLines=sep>=0?lines.slice(sep+1):[];
 
         const logOutput=[
@@ -163,6 +164,7 @@ function sendStats() {
           memPercent:  parseFloat(lines[4])||0,
           inMbps, outMbps, pps:0,
           uptime:      parseFloat(lines[5])||0,
+          udpConns:    parseInt(lines[6])||0,
           log:         logOutput,
           iface:       netNow.iface,
         });

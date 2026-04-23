@@ -13,9 +13,11 @@ const CHART_POINTS = 60;
 
 export default function Dashboard({ token }) {
   const {
-    stats, cpuHistory, netHistory, logs,
+    stats, cpuHistory, netHistory, connHistory, logs,
     isConnected, wsState, lastUpdateMs, agentStatus,
   } = useTelemetry();
+
+  const [graphTab, setGraphTab] = useState('bandwidth'); // 'bandwidth' | 'tcp' | 'udp'
 
   const [tunnelStatus, setTunnelStatus] = useState('loading');
   const [ageSec,       setAgeSec]       = useState(null);
@@ -65,6 +67,26 @@ export default function Dashboard({ token }) {
       },
     ],
   }), [netHistory]);
+
+  const tcpChartData = useMemo(() => ({
+    labels: Array(CHART_POINTS).fill(''),
+    datasets: [
+      {
+        label: 'Established TCP', borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,0.08)',
+        borderWidth: 1.5, tension: 0.4, fill: true, data: connHistory.tcp, pointRadius: 0,
+      },
+    ],
+  }), [connHistory]);
+
+  const udpChartData = useMemo(() => ({
+    labels: Array(CHART_POINTS).fill(''),
+    datasets: [
+      {
+        label: 'UDP Connections', borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,0.08)',
+        borderWidth: 1.5, tension: 0.4, fill: true, data: connHistory.udp, pointRadius: 0,
+      },
+    ],
+  }), [connHistory]);
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const uptimeLabel = useMemo(() => {
@@ -236,14 +258,48 @@ export default function Dashboard({ token }) {
 
       <section className="glass-panel elevated-panel">
         <div className="panel-heading">
-          <div><p className="eyebrow">Network</p><h3>Live Bandwidth — {stats.iface !== '-' ? stats.iface : 'Primary Interface'}</h3></div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <div className="meta-chip" style={{ color: 'var(--accent-cyan)' }}>↓ {stats.inMbps.toFixed(3)} Mbps</div>
-            <div className="meta-chip" style={{ color: 'var(--warn-amber)' }}>↑ {stats.outMbps.toFixed(3)} Mbps</div>
+          <div>
+            <p className="eyebrow">Network</p>
+            <h3>Live Traffic — {stats.iface !== '-' ? stats.iface : 'Primary Interface'}</h3>
+          </div>
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            {/* Tab switcher */}
+            {['bandwidth', 'tcp', 'udp'].map(tab => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setGraphTab(tab)}
+                style={{
+                  padding: '3px 12px',
+                  fontSize: '0.72rem',
+                  fontFamily: 'JetBrains Mono, monospace',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                  borderRadius: '4px',
+                  border: graphTab === tab ? '1px solid var(--accent-cyan)' : '1px solid rgba(255,255,255,0.08)',
+                  background: graphTab === tab ? 'rgba(34,211,238,0.12)' : 'transparent',
+                  color: graphTab === tab ? 'var(--accent-cyan)' : 'var(--text-dim)',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {tab}
+              </button>
+            ))}
+            <div className="meta-chip" style={{ color: 'var(--accent-cyan)' }}>↓ {stats.inMbps.toFixed(3)}</div>
+            <div className="meta-chip" style={{ color: 'var(--warn-amber)' }}>↑ {stats.outMbps.toFixed(3)}</div>
           </div>
         </div>
         <div className="chart-frame">
-          <Line data={netChartData} options={chartOptions(' Mbps', undefined)} />
+          {graphTab === 'bandwidth' && (
+            <Line data={netChartData} options={chartOptions(' Mbps', undefined)} />
+          )}
+          {graphTab === 'tcp' && (
+            <Line data={tcpChartData} options={chartOptions(' conns', undefined)} />
+          )}
+          {graphTab === 'udp' && (
+            <Line data={udpChartData} options={chartOptions(' conns', undefined)} />
+          )}
         </div>
       </section>
 

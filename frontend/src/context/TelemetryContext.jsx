@@ -45,19 +45,21 @@ export function TelemetryProvider({ token, children }) {
   const [stats, setStats] = useState(saved?.stats ?? {
     connections: 0, bannedIPs: 0, cpuPercent: 0,
     memPercent: 0, synRate: 0, pps: 0, uptime: 0,
-    inMbps: 0, outMbps: 0,
+    inMbps: 0, outMbps: 0, udpConns: 0,
     hostname: '-', ip: '-', os: '-', iface: '-',
   });
 
-  const [cpuHistory, setCpuHistory] = useState(saved?.cpuHistory ?? { cpu: emptyArr(), mem: emptyArr() });
-  const [netHistory, setNetHistory] = useState(saved?.netHistory ?? { inb: emptyArr(), out: emptyArr() });
-  const [logs,       setLogs]       = useState(saved?.logs ?? []);
+  const [cpuHistory,  setCpuHistory]  = useState(saved?.cpuHistory  ?? { cpu: emptyArr(), mem: emptyArr() });
+  const [netHistory,  setNetHistory]  = useState(saved?.netHistory  ?? { inb: emptyArr(), out: emptyArr() });
+  const [connHistory, setConnHistory] = useState(saved?.connHistory ?? { tcp: emptyArr(), udp: emptyArr() });
+  const [logs,        setLogs]        = useState(saved?.logs ?? []);
   const [lastUpdateMs, setLastUpdateMs] = useState(saved?.lastUpdateMs ?? null);
 
   // ── Persist to localStorage whenever key state changes ────────────────────
   const statsRef      = useRef(stats);
   const cpuHistRef    = useRef(cpuHistory);
   const netHistRef    = useRef(netHistory);
+  const connHistRef   = useRef(connHistory);
   const logsRef       = useRef(logs);
   const lastUpdateRef = useRef(lastUpdateMs);
   const agentStatRef  = useRef(agentStatus);
@@ -66,6 +68,7 @@ export function TelemetryProvider({ token, children }) {
   useEffect(() => { statsRef.current = stats; }, [stats]);
   useEffect(() => { cpuHistRef.current = cpuHistory; }, [cpuHistory]);
   useEffect(() => { netHistRef.current = netHistory; }, [netHistory]);
+  useEffect(() => { connHistRef.current = connHistory; }, [connHistory]);
   useEffect(() => { logsRef.current = logs; }, [logs]);
   useEffect(() => { lastUpdateRef.current = lastUpdateMs; }, [lastUpdateMs]);
   useEffect(() => { agentStatRef.current = agentStatus; }, [agentStatus]);
@@ -79,6 +82,7 @@ export function TelemetryProvider({ token, children }) {
         stats:        statsRef.current,
         cpuHistory:   cpuHistRef.current,
         netHistory:   netHistRef.current,
+        connHistory:  connHistRef.current,
         logs:         logsRef.current.slice(0, 200),
         lastUpdateMs: lastUpdateRef.current,
         agentStatus:  agentStatRef.current,
@@ -113,6 +117,7 @@ export function TelemetryProvider({ token, children }) {
       uptime:      s.uptime       ?? prev.uptime,
       inMbps:      s.inMbps       ?? prev.inMbps,
       outMbps:     s.outMbps      ?? prev.outMbps,
+      udpConns:    s.udpConns    ?? prev.udpConns,
       hostname:    agent.hostname || prev.hostname,
       ip:          agent.ip       || prev.ip,
       os:          agent.os       || prev.os,
@@ -128,6 +133,11 @@ export function TelemetryProvider({ token, children }) {
     setNetHistory(prev => ({
       inb: [...prev.inb.slice(1), Number((s.inMbps  || 0).toFixed(3))],
       out: [...prev.out.slice(1), Number((s.outMbps || 0).toFixed(3))],
+    }));
+
+    setConnHistory(prev => ({
+      tcp: [...prev.tcp.slice(1), s.established ?? 0],
+      udp: [...prev.udp.slice(1), s.udpConns    ?? 0],
     }));
 
     // Logs
@@ -281,6 +291,7 @@ export function TelemetryProvider({ token, children }) {
     stats,
     cpuHistory,
     netHistory,
+    connHistory,
     logs,
     lastUpdateMs,
     sendCommand,

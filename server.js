@@ -413,6 +413,7 @@ function sendStats() {
       "nft list set $NFT_TABLE blacklist 2>/dev/null | grep -oE '([0-9]{1,3}\\.){3}[0-9]{1,3}' | wc -l; " +
       "free | grep Mem | awk '{print $3/$2 * 100}'; " +
       "cat /proc/uptime | awk '{print $1}'; " +
+      "ss -anu | wc -l; " +
       // SSH events — accepted / failed / invalid from auth.log
       "grep -E 'Accepted|Failed|Invalid|Disconnected' /var/log/auth.log 2>/dev/null | tail -n 20 || " +
       "grep -E 'Accepted|Failed|Invalid|Disconnected' /var/log/secure 2>/dev/null | tail -n 20 || echo ''; " +
@@ -432,7 +433,7 @@ function sendStats() {
 
         // Split log sections
         const attackSep   = lines.findIndex(l => l.includes('---ATTACKS---'));
-        const sshLines    = lines.slice(6, attackSep >= 0 ? attackSep : lines.length);
+        const sshLines    = lines.slice(7, attackSep >= 0 ? attackSep : lines.length);
         const attackLines = attackSep >= 0 ? lines.slice(attackSep + 1) : [];
 
         const logOutput = [
@@ -453,6 +454,7 @@ function sendStats() {
           outMbps,
           pps:   0,
           uptime: parseFloat(lines[5]) || 0,
+          udpConns: parseInt(lines[6]) || 0,
           log:   logOutput,
           iface: netNow.iface,
         });
@@ -635,15 +637,29 @@ app.post('/api/agent/command-result', agentAuthMiddleware, (req, res) => {
 
 app.post('/api/command', authMiddleware, (req, res) => {
   const { cmd } = req.body;
-  const { agent_id } = req.user;
-  if (!db.agents[agent_id]) return res.status(400).json({ error: 'No agent connected' });
-  
-  if (!commandQueue[agent_id]) commandQueue[agent_id] = [];
+  const { agent_id, id: userId } = req.user;
+
+  // Primary: exact agent_id match from user profile
+  let targetAgentId = (agent_id && db.agents[agent_id]) ? agent_id : null;
+
+  // Fallback: find any connected agent that belongs to this user
+  if (!targetAgentId) {
+    const found = Object.entries(db.agents).find(([, a]) => a.userId === userId);
+    if (found) targetAgentId = found[0];
+  }
+
+  if (!targetAgentId) {
+    return res.status(400).json({ error: 'No agent connected. Make sure your agent is running and registered.' });
+  }
+
+  if (!commandQueue[targetAgentId]) commandQueue[targetAgentId] = [];
   const cmdObj = { id: crypto.randomUUID(), cmd };
-  commandQueue[agent_id].push(cmdObj);
-  
+  commandQueue[targetAgentId].push(cmdObj);
+
+  console.log(`[cmd] Queued for agent ${targetAgentId}: ${cmd.substring(0, 80)}...`);
   res.json({ success: true, cmdId: cmdObj.id });
 });
+
 
 // GRE Tunnel Endpoints
 app.post('/api/agent/tunnel/create', agentAuthMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
