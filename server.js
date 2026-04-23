@@ -409,7 +409,8 @@ function sendStats() {
       "ss -ant | wc -l; " +
       "ss -ant | grep ESTAB | wc -l; " +
       "ss -ant | grep SYN-RECV | wc -l; " +
-      "nft list set inet sbs_filter blacklist | grep -c '\\.' || echo 0; " +
+      "NFT_TABLE=$(nft list table inet sbs_filter 2>/dev/null && echo 'inet sbs_filter' || echo 'inet detroit_guard'); " +
+      "nft list set $NFT_TABLE blacklist 2>/dev/null | grep -oE '([0-9]{1,3}\\.){3}[0-9]{1,3}' | wc -l; " +
       "free | grep Mem | awk '{print $3/$2 * 100}'; " +
       "cat /proc/uptime | awk '{print $1}'; " +
       // SSH events — accepted / failed / invalid from auth.log
