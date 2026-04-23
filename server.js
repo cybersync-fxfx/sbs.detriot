@@ -676,6 +676,12 @@ app.post('/api/agent/tunnel/create', agentAuthMiddleware, privilegedSupabaseMidd
 });
 
 async function setupTunnel(req, res, agentId, clientIp) {
+  console.log(`[tunnel] setupTunnel triggered for agentId: ${agentId}, clientIp: ${clientIp}`);
+
+  if (!agentId) {
+    return res.status(400).json({ error: 'No agent ID associated with this account.' });
+  }
+
   if (!clientIp || clientIp === 'auto') {
     return res.status(400).json({ error: 'Could not determine client IP. Please ensure agent is connected.' });
   }
