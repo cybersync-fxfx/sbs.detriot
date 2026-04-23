@@ -723,22 +723,21 @@ async function setupTunnel(req, res, agentId, clientIp) {
     // We use a one-liner to create the GRE tunnel on the client
     const tunnelName = `gre_${agentId.substring(0, 8)}`;
     const clientCmd = `
-      ip tunnel del ${tunnelName} 2>/dev/null || true;
-      ip tunnel add ${tunnelName} mode gre remote ${guardPubIp} local $(curl -s ifconfig.me || ip route get 1.1.1.1 | grep -oP 'src \\K\\S+') ttl 255;
-      ip addr add 10.0.0.2/30 dev ${tunnelName} 2>/dev/null || true;
-      ip link set ${tunnelName} up;
-      
-      # Routing
-      ip route add 10.0.0.1 dev ${tunnelName} 2>/dev/null || true;
-      
-      # Block direct access - allow only from tunnel and guard IP
-      # We allow SSH (22) from everywhere for safety, but drop 80/443 on public interface
-      if command -v nft >/dev/null; then
-        echo "flush ruleset; table inet detroit_guard { set blacklist { type ipv4_addr; flags dynamic,timeout; timeout 24h; } chain input { type filter hook input priority 0; policy accept; ct state established,related accept; iif lo accept; ip saddr ${guardPubIp} ip protocol gre accept; tcp dport 22 accept; iifname \\"${tunnelName}\\" accept; iifname != \\"${tunnelName}\\" tcp dport { 80, 443 } drop; ip saddr @blacklist drop; } }" > /etc/nftables.conf;
-        nft -f /etc/nftables.conf;
-      fi
-      
-      echo "Tunnel ${tunnelName} established to ${guardPubIp} with direct access restricted";
+      LOG_FILE=/var/log/sbs/agent.log;
+      {
+        echo "[tunnel] starting client tunnel ${tunnelName}";
+        LOCAL_IP=$(ip route get ${guardPubIp} | awk '/src/ {for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}');
+        if [ -z "$LOCAL_IP" ]; then
+          echo "[tunnel] unable to determine client local IP for ${guardPubIp}";
+          exit 1;
+        fi
+        ip tunnel del ${tunnelName} 2>/dev/null || true;
+        ip tunnel add ${tunnelName} mode gre remote ${guardPubIp} local "$LOCAL_IP" ttl 255;
+        ip addr replace 10.0.0.2/30 dev ${tunnelName};
+        ip link set ${tunnelName} up;
+        ip route replace 10.0.0.1 dev ${tunnelName};
+        echo "[tunnel] client interface ${tunnelName} is up using local $LOCAL_IP";
+      } >> "$LOG_FILE" 2>&1
     `.replace(/\n/g, ' ').trim();
 
     commandQueue[agentId].push({ id: crypto.randomUUID(), cmd: clientCmd });
