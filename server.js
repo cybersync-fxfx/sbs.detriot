@@ -729,7 +729,7 @@ async function setupTunnel(req, res, agentId, clientIp) {
     console.error('Tunnel creation failed:', err.message);
     res.status(500).json({ error: 'Tunnel creation failed: ' + err.message });
   }
-});
+}
 
 app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
   const { agent_id } = req.user;
