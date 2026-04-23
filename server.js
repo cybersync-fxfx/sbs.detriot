@@ -909,26 +909,44 @@ app.get('/api/health', (req, res) => {
 // Threat Radar API
 app.get('/api/radar/stats', authMiddleware, async (req, res) => {
   try {
-    const { data: recent } = await supabaseAdmin
+    const since = new Date(Date.now() - 86400000).toISOString();
+
+    const { data: recent, error: recentError } = await supabaseAdmin
       .from('threat_radar')
       .select('*')
       .order('detected_at', { ascending: false })
       .limit(50);
+    if (recentError) throw recentError;
       
-    const { count: scannedToday } = await supabaseAdmin
+    const { count: scannedToday, error: scannedError } = await supabaseAdmin
       .from('threat_radar')
       .select('*', { count: 'exact', head: true })
-      .gte('detected_at', new Date(Date.now() - 86400000).toISOString());
+      .gte('detected_at', since);
+    if (scannedError) throw scannedError;
 
-    const { count: blockedToday } = await supabaseAdmin
+    const { count: blockedToday, error: blockedError } = await supabaseAdmin
       .from('threat_radar')
       .select('*', { count: 'exact', head: true })
       .eq('action', 'banned')
-      .gte('detected_at', new Date(Date.now() - 86400000).toISOString());
+      .gte('detected_at', since);
+    if (blockedError) throw blockedError;
 
-    res.json({ recent, stats: { scannedToday, blockedToday } });
+    res.json({
+      recent: recent || [],
+      stats: {
+        scannedToday: scannedToday || 0,
+        blockedToday: blockedToday || 0
+      }
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const missingRadarTable = err?.code === '42P01' || /threat_radar/i.test(err?.message || '');
+    res.status(missingRadarTable ? 503 : 500).json({
+      error: missingRadarTable
+        ? 'Threat Radar database setup is incomplete. Run supabase_threat_radar.sql in Supabase.'
+        : (err.message || 'Threat Radar stats failed to load.'),
+      setupRequired: missingRadarTable,
+      code: err?.code || null
+    });
   }
 });
 

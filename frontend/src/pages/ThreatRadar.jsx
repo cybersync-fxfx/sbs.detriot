@@ -1,20 +1,44 @@
-import { useEffect, useState, useMemo } from 'react';
-import { useTelemetry } from '../context/TelemetryContext';
+import { useEffect, useState } from 'react';
 
 export default function ThreatRadar({ token }) {
   const [data, setData] = useState({ recent: [], stats: { scannedToday: 0, blockedToday: 0 } });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [setupRequired, setSetupRequired] = useState(false);
   const [threshold, setThreshold] = useState(75);
   const [autoBan, setAutoBan] = useState(true);
 
   const fetchStats = () => {
     fetch('/api/radar/stats', { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
+      .then(async (r) => {
+        const payload = await r.json();
+        if (!r.ok) {
+          const nextError = payload?.error || 'Threat Radar failed to load.';
+          const next = new Error(nextError);
+          next.setupRequired = Boolean(payload?.setupRequired);
+          throw next;
+        }
+        return payload;
+      })
       .then(d => {
-        setData(d);
+        setData({
+          recent: Array.isArray(d?.recent) ? d.recent : [],
+          stats: {
+            scannedToday: Number(d?.stats?.scannedToday || 0),
+            blockedToday: Number(d?.stats?.blockedToday || 0)
+          }
+        });
+        setError('');
+        setSetupRequired(false);
         setLoading(false);
       })
-      .catch(e => console.error(e));
+      .catch(e => {
+        console.error(e);
+        setError(e.message || 'Threat Radar failed to load.');
+        setSetupRequired(Boolean(e.setupRequired));
+        setData({ recent: [], stats: { scannedToday: 0, blockedToday: 0 } });
+        setLoading(false);
+      });
   };
 
   useEffect(() => {
@@ -44,14 +68,24 @@ export default function ThreatRadar({ token }) {
         </div>
       </section>
 
+      {error ? (
+        <section className={`callout-banner ${setupRequired ? 'warning' : 'danger'}`}>
+          <strong>{setupRequired ? 'Threat Radar setup required.' : 'Threat Radar unavailable.'}</strong>
+          <span>
+            {error}
+            {setupRequired ? ' Run supabase_threat_radar.sql in your Supabase SQL editor, then reload this page.' : ''}
+          </span>
+        </section>
+      ) : null}
+
       <section className="metric-grid">
         <article className="metric-card tone-blue">
           <div className="metric-label">Scanned Today</div>
-          <div className="metric-value">{data.stats.scannedToday}</div>
+          <div className="metric-value">{loading ? '...' : data.stats.scannedToday}</div>
         </article>
         <article className="metric-card tone-red">
           <div className="metric-label">Blocked Today</div>
-          <div className="metric-value">{data.stats.blockedToday}</div>
+          <div className="metric-value">{loading ? '...' : data.stats.blockedToday}</div>
         </article>
         <article className="metric-card">
           <div className="metric-label">Auto-Ban Threshold</div>
@@ -70,32 +104,38 @@ export default function ThreatRadar({ token }) {
             <div className="meta-chip">Live Feed</div>
           </div>
           <div className="terminal-log terminal-large">
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
-              <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--panel-border)', color: 'var(--text-muted)' }}>
-                  <th style={{ padding: '8px' }}>IP ADDRESS</th>
-                  <th style={{ padding: '8px' }}>SCORE</th>
-                  <th style={{ padding: '8px' }}>REASON</th>
-                  <th style={{ padding: '8px' }}>ACTION</th>
-                  <th style={{ padding: '8px' }}>TIME</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.recent.map(item => (
-                  <tr key={item.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                    <td style={{ padding: '8px', fontFamily: 'var(--font-mono)' }}>{item.ip}</td>
-                    <td style={{ padding: '8px' }}>
-                      <span className={`fact-value ${scoreColor(item.score)}`}>{item.score}</span>
-                    </td>
-                    <td style={{ padding: '8px', color: 'var(--text-soft)' }}>{item.reason}</td>
-                    <td style={{ padding: '8px', textTransform: 'uppercase', fontSize: '0.65rem', fontWeight: 700 }}>
-                      <span className={item.action === 'banned' ? 'text-red' : 'text-cyan'}>{item.action}</span>
-                    </td>
-                    <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{new Date(item.detected_at).toLocaleTimeString()}</td>
+            {loading ? (
+              <div className="empty-state">Loading Threat Radar telemetry...</div>
+            ) : data.recent.length === 0 ? (
+              <div className="empty-state">No radar events have been recorded yet.</div>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--panel-border)', color: 'var(--text-muted)' }}>
+                    <th style={{ padding: '8px' }}>IP ADDRESS</th>
+                    <th style={{ padding: '8px' }}>SCORE</th>
+                    <th style={{ padding: '8px' }}>REASON</th>
+                    <th style={{ padding: '8px' }}>ACTION</th>
+                    <th style={{ padding: '8px' }}>TIME</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {data.recent.map(item => (
+                    <tr key={item.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                      <td style={{ padding: '8px', fontFamily: 'var(--font-mono)' }}>{item.ip}</td>
+                      <td style={{ padding: '8px' }}>
+                        <span className={`fact-value ${scoreColor(item.score)}`}>{item.score}</span>
+                      </td>
+                      <td style={{ padding: '8px', color: 'var(--text-soft)' }}>{item.reason}</td>
+                      <td style={{ padding: '8px', textTransform: 'uppercase', fontSize: '0.65rem', fontWeight: 700 }}>
+                        <span className={item.action === 'banned' ? 'text-red' : 'text-cyan'}>{item.action}</span>
+                      </td>
+                      <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{new Date(item.detected_at).toLocaleTimeString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </article>
 
