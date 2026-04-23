@@ -3,6 +3,10 @@ import { useTelemetry } from '../context/TelemetryContext';
 
 const ipv4Pattern = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 
+// Shell snippet that detects whichever nftables table this server uses
+// Supports: inet sbs_filter (agent installer) and inet detroit_guard (setup-guard.sh)
+const NFT_DETECT = `NFT_TABLE=$(nft list table inet sbs_filter 2>/dev/null && echo "inet sbs_filter" || echo "inet detroit_guard")`;
+
 function extractBlockedIps(output) {
   const matches = output.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g);
   return [...new Set(matches || [])];
@@ -38,7 +42,7 @@ export default function Blocklist({ token, user }) {
     setUnbanFeedback({ msg: '', type: '' });
     setIsBusy(true);
     try {
-      const result = await sendCommand('nft list set inet sbs_filter blacklist');
+      const result = await sendCommand(`${NFT_DETECT}; nft list set $NFT_TABLE blacklist`);
       const { ok, msg } = applyResult(result);
       if (!ok) {
         setBanFeedback({ msg, type: 'danger' });
@@ -69,7 +73,7 @@ export default function Blocklist({ token, user }) {
     setIsBusy(true);
     try {
       const result = await sendCommand(
-        `nft add element inet sbs_filter blacklist { ${ip} } && nft list set inet sbs_filter blacklist`
+        `${NFT_DETECT}; nft add element $NFT_TABLE blacklist { ${ip} } && nft list set $NFT_TABLE blacklist`
       );
       const { ok, msg } = applyResult(result);
       if (!ok) {
@@ -95,7 +99,7 @@ export default function Blocklist({ token, user }) {
     setIsBusy(true);
     try {
       const result = await sendCommand(
-        `nft delete element inet sbs_filter blacklist { ${ip} } && nft list set inet sbs_filter blacklist`
+        `${NFT_DETECT}; nft delete element $NFT_TABLE blacklist { ${ip} } && nft list set $NFT_TABLE blacklist`
       );
       const { ok, msg } = applyResult(result);
       if (!ok) {

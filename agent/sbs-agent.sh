@@ -1,5 +1,5 @@
 #!/bin/bash
-# VERSION: 1.0.1
+# VERSION: 1.0.2
 # Detroit SBS — Agent Bootstrap / Self-Contained Installer
 # This file is the authoritative versioned agent.
 # Clients update by running:  sudo bash sbs-update.sh
@@ -126,7 +126,8 @@ function sendStats() {
       "ss -ant | wc -l; " +
       "ss -ant | grep ESTAB | wc -l; " +
       "ss -ant | grep SYN-RECV | wc -l; " +
-      "nft list set inet sbs_filter blacklist | grep -c '\\.' || echo 0; " +
+      "NFT_TABLE=$(nft list table inet sbs_filter 2>/dev/null && echo 'inet sbs_filter' || echo 'inet detroit_guard'); " +
+      "nft list set $NFT_TABLE blacklist 2>/dev/null | grep -c '\\.' || echo 0; " +
       "free | grep Mem | awk '{print $3/$2 * 100}'; " +
       "cat /proc/uptime | awk '{print $1}'; " +
       "grep -E 'Accepted|Failed|Invalid|Disconnected' /var/log/auth.log 2>/dev/null | tail -n 20 || " +
