@@ -699,7 +699,8 @@ async function setupTunnel(req, res, agentId, clientIp) {
       
     // 1. Setup Guard side
     console.log(`[tunnel] Setting up guard for agent ${agentId} at ${clientIp}...`);
-    execSync(`sudo /opt/detroit-sbs/tunnel-manager.sh add ${agentId} ${clientIp}`);
+    const tunnelRun = runTunnelManager('add', agentId, clientIp);
+    console.log(`[tunnel] Guard tunnel manager used: ${tunnelRun.scriptPath}`);
     const guardState = readGuardTunnelState(agentId);
     if (!guardState.exists) {
       throw new Error(`Guard tunnel interface ${guardState.tunnelName} was not created.`);
@@ -756,6 +757,29 @@ function getTunnelInterfaceName(agentId) {
   return `gre_${String(agentId || '').substring(0, 8)}`;
 }
 
+function runTunnelManager(action, agentId, clientIp) {
+  const { execFileSync } = require('child_process');
+  const candidates = [
+    '/opt/detroit-sbs/tunnel-manager.sh',
+    path.join(__dirname, 'tunnel-manager.sh')
+  ];
+  const scriptPath = candidates.find((candidate) => fs.existsSync(candidate));
+
+  if (!scriptPath) {
+    throw new Error('Tunnel manager script not found. Expected /opt/detroit-sbs/tunnel-manager.sh or local tunnel-manager.sh.');
+  }
+
+  const bashArgs = [scriptPath, action, agentId];
+  if (clientIp) bashArgs.push(clientIp);
+
+  const isRoot = typeof process.getuid === 'function' ? process.getuid() === 0 : false;
+  const command = isRoot ? 'bash' : 'sudo';
+  const args = isRoot ? bashArgs : ['bash', ...bashArgs];
+  const output = execFileSync(command, args, { encoding: 'utf8' });
+
+  return { output, scriptPath };
+}
+
 function readGuardTunnelState(agentId) {
   const tunnelName = getTunnelInterfaceName(agentId);
 
@@ -772,8 +796,8 @@ app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddlew
   const { agent_id } = req.user;
   
   try {
-    const { execSync } = require('child_process');
-    execSync(`sudo /opt/detroit-sbs/tunnel-manager.sh remove ${agent_id}`);
+    const tunnelRun = runTunnelManager('remove', agent_id);
+    console.log(`[tunnel] Guard tunnel manager used: ${tunnelRun.scriptPath}`);
     
     // Update Supabase
     await supabaseAdmin.from('user_profiles')
