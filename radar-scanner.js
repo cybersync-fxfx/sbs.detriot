@@ -1,7 +1,18 @@
 const { execSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
 const BAN_THRESHOLD = 75;
+const INTEL_DIR = path.join(__dirname, 'intel');
+
+// Ensure intel directory exists
+if (!fs.existsSync(INTEL_DIR)) {
+  fs.mkdirSync(INTEL_DIR, { recursive: true });
+}
+if (!fs.existsSync(path.join(INTEL_DIR, 'logs'))) {
+  fs.mkdirSync(path.join(INTEL_DIR, 'logs'), { recursive: true });
+}
 
 /**
  * Detroit SBS - Real Time Threat Radar
@@ -101,11 +112,53 @@ class RadarScanner {
 
   async logThreat(ip, score, reason, action, abuseScore) {
     try {
+      // 1. Save to Supabase
       await this.supabaseAdmin.from('threat_radar').insert({
         ip, score, reason, action, abuseipdb_score: 0
       });
+
+      // 2. Save to Local Intelligence Database (Full behavior history)
+      this.saveToLocalIntel(ip, score, reason, action);
     } catch (e) {
       console.error('[Radar] DB Log error:', e.message);
+    }
+  }
+
+  saveToLocalIntel(ip, score, reason, action) {
+    try {
+      const date = new Date().toISOString().split('T')[0];
+      const time = new Date().toISOString();
+      const logFile = path.join(INTEL_DIR, 'logs', `${date}.jsonl`);
+      const ipFile = path.join(INTEL_DIR, `${ip}.json`);
+
+      const entry = {
+        timestamp: time,
+        ip,
+        score,
+        reason,
+        action,
+        // Include raw connection data if possible (placeholder for future expansion)
+        behavior: reason.split(', ')
+      };
+
+      // Append to daily log file
+      fs.appendFileSync(logFile, JSON.stringify(entry) + '\n');
+
+      // Update per-IP historical database
+      let ipHistory = { ip, first_seen: time, last_seen: time, events: [] };
+      if (fs.existsSync(ipFile)) {
+        ipHistory = JSON.parse(fs.readFileSync(ipFile, 'utf-8'));
+      }
+      
+      ipHistory.last_seen = time;
+      // Keep only last 100 events per IP to save space
+      ipHistory.events.unshift(entry);
+      ipHistory.events = ipHistory.events.slice(0, 100);
+      
+      fs.writeFileSync(ipFile, JSON.stringify(ipHistory, null, 2));
+
+    } catch (e) {
+      console.error('[Radar] Intel save error:', e.message);
     }
   }
 
