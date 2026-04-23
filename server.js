@@ -712,7 +712,7 @@ async function setupTunnel(req, res, agentId, clientIp) {
       # Block direct access - allow only from tunnel and guard IP
       # We allow SSH (22) from everywhere for safety, but drop 80/443 on public interface
       if command -v nft >/dev/null; then
-        echo "flush ruleset; table inet sbs_filter { chain input { type filter hook input priority 0; policy accept; ct state established,related accept; iif lo accept; ip saddr ${guardPubIp} ip protocol gre accept; tcp dport 22 accept; iifname \\"${tunnelName}\\" accept; iifname != \\"${tunnelName}\\" tcp dport { 80, 443 } drop; } }" > /etc/nftables.conf;
+        echo "flush ruleset; table inet detroit_guard { chain input { type filter hook input priority 0; policy accept; ct state established,related accept; iif lo accept; ip saddr ${guardPubIp} ip protocol gre accept; tcp dport 22 accept; iifname \\"${tunnelName}\\" accept; iifname != \\"${tunnelName}\\" tcp dport { 80, 443 } drop; } }" > /etc/nftables.conf;
         nft -f /etc/nftables.conf;
       fi
       
