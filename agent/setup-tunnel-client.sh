@@ -1,80 +1,88 @@
 #!/bin/bash
-# SBS Detroit - Client Tunnel Setup Script
-# Usage: sudo bash setup-tunnel-client.sh <guard_public_ip> <client_internal_ip> <guard_internal_ip>
+set -euo pipefail
 
-GUARD_PUB_IP=$1
-CLIENT_INT_IP=$2
-GUARD_INT_IP=$3
+ENV_FILE="${SBS_TUNNEL_ENV_FILE:-/opt/sbs-agent/tunnel.env}"
+LOG_FILE="${SBS_TUNNEL_LOG_FILE:-/var/log/sbs/agent.log}"
 
-if [ -z "$GUARD_PUB_IP" ] || [ -z "$CLIENT_INT_IP" ] || [ -z "$GUARD_INT_IP" ]; then
-  echo "Usage: $0 <guard_public_ip> <client_internal_ip> <guard_internal_ip>"
-  exit 1
-fi
-
-TUNNEL_NAME="gre_sbs"
-
-echo "[1/4] Creating GRE tunnel to ${GUARD_PUB_IP}..."
-ip tunnel del ${TUNNEL_NAME} 2>/dev/null || true
-ip tunnel add ${TUNNEL_NAME} mode gre remote ${GUARD_PUB_IP} local $(curl -s ifconfig.me) ttl 255
-ip addr add ${CLIENT_INT_IP}/30 dev ${TUNNEL_NAME}
-ip link set ${TUNNEL_NAME} up
-
-echo "[2/4] Configuring Routing..."
-# Create a new routing table for the tunnel
-echo "100 sbs_route" >> /etc/iproute2/rt_tables 2>/dev/null || true
-
-# Flush the table
-ip route flush table sbs_route
-
-# Add default route through the tunnel
-ip route add default via ${GUARD_INT_IP} dev ${TUNNEL_NAME} table sbs_route
-
-# Add a rule to use this table for all traffic (except what we exclude)
-# We need to make sure the connection to the panel doesn't go through the tunnel if the tunnel is what carries it.
-# Actually, the panel IS the guard. So traffic to GUARD_PUB_IP must go through the default gateway.
-DEFAULT_GW=$(ip route | grep default | awk '{print $3}')
-ip route add ${GUARD_PUB_IP} via ${DEFAULT_GW} table sbs_route
-
-# Use the table
-ip rule add from ${CLIENT_INT_IP} table sbs_route
-ip rule add to ${GUARD_INT_IP} table sbs_route
-
-# Optionally, route ALL traffic through the tunnel (DANGER: can lock you out)
-# ip rule add from all table sbs_route priority 100
-
-echo "[3/4] Blocking Direct Access..."
-# Update nftables to only allow traffic from the guard IP on public ports
-cat << EOF > /etc/nftables.conf
-#!/usr/sbin/nft -f
-flush ruleset
-
-table inet sbs_filter {
-  chain input {
-    type filter hook input priority 0; policy accept;
-    
-    # Allow loopback
-    iif lo accept
-
-    # Allow established connections
-    ct state established,related accept
-
-    # Allow GRE for the tunnel
-    ip saddr ${GUARD_PUB_IP} ip protocol gre accept
-
-    # Allow SSH from everywhere (safeguard)
-    tcp dport 22 accept
-
-    # ONLY allow traffic through the GRE tunnel for other ports
-    iifname "${TUNNEL_NAME}" accept
-    
-    # Drop everything else on public interfaces (optional, be careful)
-    # iifname != "${TUNNEL_NAME}" tcp dport { 80, 443 } drop
-  }
+log() {
+  local message="$1"
+  mkdir -p "$(dirname "$LOG_FILE")"
+  touch "$LOG_FILE"
+  printf '[%s] [tunnel] %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$message" | tee -a "$LOG_FILE" >/dev/null
 }
-EOF
-nft -f /etc/nftables.conf
 
-echo "[4/4] Testing Connectivity..."
-ping -c 3 ${GUARD_INT_IP}
+load_env() {
+  if [ ! -f "$ENV_FILE" ]; then
+    log "missing tunnel env file at $ENV_FILE"
+    exit 1
+  fi
 
-echo "Tunnel setup complete! Internal IP: ${CLIENT_INT_IP}"
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  set +a
+
+  : "${SBS_TUNNEL_NAME:?Missing SBS_TUNNEL_NAME}"
+  : "${SBS_GUARD_PUBLIC_IP:?Missing SBS_GUARD_PUBLIC_IP}"
+  : "${SBS_GUARD_TUNNEL_IP:?Missing SBS_GUARD_TUNNEL_IP}"
+  : "${SBS_CLIENT_TUNNEL_IP:?Missing SBS_CLIENT_TUNNEL_IP}"
+  SBS_TUNNEL_CIDR="${SBS_TUNNEL_CIDR:-30}"
+}
+
+detect_local_ip() {
+  ip route get "$SBS_GUARD_PUBLIC_IP" | awk '/src/ {for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}'
+}
+
+apply_tunnel() {
+  load_env
+  local local_ip
+  local_ip="$(detect_local_ip)"
+
+  if [ -z "$local_ip" ]; then
+    log "unable to determine local public IP for guard $SBS_GUARD_PUBLIC_IP"
+    exit 1
+  fi
+
+  log "applying ${SBS_TUNNEL_NAME} via ${local_ip} -> ${SBS_GUARD_PUBLIC_IP}"
+  ip tunnel del "$SBS_TUNNEL_NAME" 2>/dev/null || true
+  ip tunnel add "$SBS_TUNNEL_NAME" mode gre remote "$SBS_GUARD_PUBLIC_IP" local "$local_ip" ttl 255
+  ip addr replace "${SBS_CLIENT_TUNNEL_IP}/${SBS_TUNNEL_CIDR}" dev "$SBS_TUNNEL_NAME"
+  ip link set "$SBS_TUNNEL_NAME" up
+  ip route replace "${SBS_GUARD_TUNNEL_IP}/32" dev "$SBS_TUNNEL_NAME"
+
+  if [ -n "${SBS_PROTECTED_CIDRS:-}" ]; then
+    OLD_IFS="$IFS"
+    IFS=','
+    for subnet in $SBS_PROTECTED_CIDRS; do
+      subnet="$(echo "$subnet" | xargs)"
+      if [ -n "$subnet" ]; then
+        ip route replace "$subnet" via "$SBS_GUARD_TUNNEL_IP" dev "$SBS_TUNNEL_NAME"
+      fi
+    done
+    IFS="$OLD_IFS"
+  fi
+
+  log "interface ${SBS_TUNNEL_NAME} is ready with ${SBS_CLIENT_TUNNEL_IP}/${SBS_TUNNEL_CIDR}"
+}
+
+remove_tunnel() {
+  if [ -f "$ENV_FILE" ]; then
+    load_env
+    log "removing ${SBS_TUNNEL_NAME}"
+    ip link set "$SBS_TUNNEL_NAME" down 2>/dev/null || true
+    ip tunnel del "$SBS_TUNNEL_NAME" 2>/dev/null || true
+  fi
+}
+
+case "${1:---apply}" in
+  --apply|apply)
+    apply_tunnel
+    ;;
+  --remove|remove)
+    remove_tunnel
+    ;;
+  *)
+    echo "Usage: $0 [--apply|--remove]" >&2
+    exit 1
+    ;;
+esac

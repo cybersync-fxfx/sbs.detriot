@@ -23,8 +23,11 @@ SBS is a full-stack web application designed for DDoS protection management. Use
    SUPABASE_URL="your-supabase-url"
    SUPABASE_ANON_KEY="your-supabase-anon-key"
    SUPABASE_SERVICE_KEY="your-supabase-service-role-key"
+   GUARD_PUBLIC_IP="43.228.212.54"
+   SBS_TUNNEL_POOL="10.200.0.0/16"
    ```
    `SUPABASE_SERVICE_KEY` is required for admin approval, admin user listing, and tunnel/profile updates. The server also accepts `SUPABASE_SERVICE_ROLE_KEY` as an alias.
+   `GUARD_PUBLIC_IP` should be the real public GRE endpoint for the guard server. `SBS_TUNNEL_POOL` controls the per-agent `/30` pool used for GRE tunnel addressing.
 
 3. **Database Setup:**
    Execute the contents of `supabase_setup.sql` in your Supabase project's SQL Editor to create the required tables, triggers, and security policies.
@@ -70,6 +73,8 @@ PORT=3001
 SUPABASE_URL="your-supabase-url"
 SUPABASE_ANON_KEY="your-supabase-anon-key"
 SUPABASE_SERVICE_KEY="your-supabase-service-role-key"
+GUARD_PUBLIC_IP="43.228.212.54"
+SBS_TUNNEL_POOL="10.200.0.0/16"
 ```
 
 ### 4. Nginx Reverse Proxy Config (with WebSocket Support)
@@ -105,6 +110,28 @@ Run Certbot to automatically configure SSL for your domain:
 ```bash
 sudo certbot --nginx -d yourdomain.com
 ```
+
+### 6. Guard Tunnel Runtime
+Run the guard bootstrap after deployment so GRE state, nftables auto-ban, and tunnel restore services are installed:
+
+```bash
+cd /opt/sbs
+chmod +x setup-guard.sh tunnel-manager.sh restore-tunnels.sh
+sudo bash ./setup-guard.sh
+```
+
+This installs:
+- `/opt/detroit-sbs/tunnel-manager.sh`
+- `/opt/detroit-sbs/restore-tunnels.sh`
+- `sbs-tunnel-restore.service` to recreate saved GRE tunnels after reboot
+
+### 7. Cloudflare / Reverse Proxy
+If you place the panel behind Cloudflare, do not leave `Under Attack Mode` or managed browser challenges enabled for machine-to-machine agent routes. The agent must be able to reach:
+
+- `/api/agent/*`
+- `/api/health`
+
+Create a bypass/skip rule for those paths or move the agent API to a separate hostname without browser challenges.
 
 ---
 

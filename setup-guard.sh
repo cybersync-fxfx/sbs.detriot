@@ -15,7 +15,9 @@ sysctl -p /etc/sysctl.d/99-detroit-sbs.conf
 echo "[2/5] Setting up Tunnel Manager..."
 mkdir -p /opt/detroit-sbs
 cp tunnel-manager.sh /opt/detroit-sbs/ 2>/dev/null || echo "Warning: Please ensure tunnel-manager.sh is in /opt/detroit-sbs/"
+cp restore-tunnels.sh /opt/detroit-sbs/ 2>/dev/null || echo "Warning: Please ensure restore-tunnels.sh is in /opt/detroit-sbs/"
 chmod +x /opt/detroit-sbs/tunnel-manager.sh
+chmod +x /opt/detroit-sbs/restore-tunnels.sh
 
 echo "[3/5] Configuring sudoers for Node.js..."
 if ! grep -q "/opt/detroit-sbs/tunnel-manager.sh" /etc/sudoers; then
@@ -147,6 +149,25 @@ SVCEOF
 systemctl daemon-reload
 systemctl enable sbs-ban-logger
 systemctl restart sbs-ban-logger
+
+cat << 'RESTORESVCEOF' > /etc/systemd/system/sbs-tunnel-restore.service
+[Unit]
+Description=SBS Tunnel Restore
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/detroit-sbs/restore-tunnels.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+RESTORESVCEOF
+
+systemctl daemon-reload
+systemctl enable sbs-tunnel-restore
+systemctl restart sbs-tunnel-restore || true
 
 echo ""
 echo "=============================================="

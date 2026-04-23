@@ -33,6 +33,14 @@ const http = require('http');
 const WebSocket = require('ws');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
+const {
+  DEFAULT_POOL_CIDR,
+  getTunnelConfig,
+  getOrAllocateTunnelConfig,
+  releaseTunnelConfig,
+  getTunnelStatePath,
+  tunnelNameForAgent,
+} = require('./tunnel-config');
 
 const app = express();
 const server = http.createServer(app);
@@ -60,6 +68,34 @@ app.use(express.static(path.join(__dirname, 'frontend', 'dist')));
 let db = { agents: {} }; // agents store runtime state
 let commandQueue = {}; // { agentId: [{ id, cmd }] }
 
+const ipv4Pattern = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+const escapeTemplateLiteral = (value) => String(value)
+  .replace(/\\/g, '\\\\')
+  .replace(/`/g, '\\`')
+  .replace(/\$\{/g, '\\${');
+
+const CLIENT_TUNNEL_SCRIPT_SOURCE = escapeTemplateLiteral(
+  fs.readFileSync(path.join(__dirname, 'agent', 'setup-tunnel-client.sh'), 'utf8')
+);
+
+const CLIENT_TUNNEL_SERVICE_UNIT = escapeTemplateLiteral(`[Unit]
+Description=SBS Client GRE Tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/opt/sbs-agent/tunnel.env
+ExecStart=/opt/sbs-agent/setup-tunnel-client.sh --apply
+ExecStop=/opt/sbs-agent/setup-tunnel-client.sh --remove
+StandardOutput=append:/var/log/sbs/agent.log
+StandardError=append:/var/log/sbs/agent.log
+
+[Install]
+WantedBy=multi-user.target
+`);
+
 const normalizeIp = (value) => {
   if (!value) return '';
   const candidate = Array.isArray(value) ? value[0] : String(value).split(',')[0].trim();
@@ -82,6 +118,162 @@ const buildAgentConnectedMessage = (agent) => ({
   os: agent.os || 'Ubuntu',
   agentStatus: 'CONNECTED'
 });
+
+const assertValidIpv4 = (ip) => {
+  if (!ipv4Pattern.test(String(ip || '').trim())) {
+    throw new Error(`Invalid IPv4 address: ${ip}`);
+  }
+  return String(ip).trim();
+};
+
+const resolveGuardPublicIp = (req) => {
+  const configured = normalizeIp(process.env.GUARD_PUBLIC_IP || '');
+  if (ipv4Pattern.test(configured)) return configured;
+
+  const host = String(req?.headers?.host || '').split(':')[0].trim();
+  if (ipv4Pattern.test(host)) return host;
+
+  try {
+    return assertValidIpv4(execSync('curl -4 -fsS https://api.ipify.org').toString().trim());
+  } catch (err) {
+    throw new Error('Unable to determine guard public IP. Set GUARD_PUBLIC_IP in the server environment.');
+  }
+};
+
+const buildClientTunnelBootstrapCommand = (tunnelConfig) => {
+  const protectedCidrs = String(process.env.SBS_PROTECTED_CIDRS || '').trim();
+
+  return `
+mkdir -p /opt/sbs-agent /var/log/sbs
+touch /var/log/sbs/agent.log
+cat <<'TUNNEL_SCRIPT_EOF' > /opt/sbs-agent/setup-tunnel-client.sh
+${CLIENT_TUNNEL_SCRIPT_SOURCE}
+TUNNEL_SCRIPT_EOF
+chmod +x /opt/sbs-agent/setup-tunnel-client.sh
+cat <<'TUNNEL_ENV_EOF' > /opt/sbs-agent/tunnel.env
+SBS_TUNNEL_NAME=${tunnelConfig.tunnelName}
+SBS_GUARD_PUBLIC_IP=${tunnelConfig.guardPublicIp}
+SBS_GUARD_TUNNEL_IP=${tunnelConfig.guardTunnelIp}
+SBS_CLIENT_TUNNEL_IP=${tunnelConfig.clientTunnelIp}
+SBS_TUNNEL_CIDR=${tunnelConfig.tunnelCidr || 30}
+SBS_PROTECTED_CIDRS=${protectedCidrs}
+TUNNEL_ENV_EOF
+cat <<'TUNNEL_UNIT_EOF' > /etc/systemd/system/sbs-tunnel.service
+${CLIENT_TUNNEL_SERVICE_UNIT}
+TUNNEL_UNIT_EOF
+systemctl daemon-reload
+systemctl enable sbs-tunnel.service
+systemctl restart sbs-tunnel.service
+`.trim();
+};
+
+const buildClientTunnelRemovalCommand = () => `
+if systemctl list-unit-files sbs-tunnel.service >/dev/null 2>&1; then
+  systemctl disable --now sbs-tunnel.service || systemctl stop sbs-tunnel.service || true
+fi
+if [ -f /opt/sbs-agent/setup-tunnel-client.sh ]; then
+  /opt/sbs-agent/setup-tunnel-client.sh --remove || true
+fi
+rm -f /opt/sbs-agent/tunnel.env
+`.trim();
+
+function detectGuardFirewallTable() {
+  const { execFileSync } = require('child_process');
+  const candidates = [
+    { family: 'inet', table: 'detroit_guard' },
+    { family: 'inet', table: 'sbs_filter' },
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      execFileSync('nft', ['list', 'table', candidate.family, candidate.table], {
+        stdio: ['ignore', 'ignore', 'ignore'],
+      });
+      return candidate;
+    } catch (_) {
+      // keep checking
+    }
+  }
+
+  return { family: 'inet', table: 'detroit_guard' };
+}
+
+function execNft(args) {
+  const { execFileSync } = require('child_process');
+  try {
+    return execFileSync('nft', args, { encoding: 'utf8' });
+  } catch (err) {
+    const stderr = err.stderr ? String(err.stderr).trim() : '';
+    const stdout = err.stdout ? String(err.stdout).trim() : '';
+    throw new Error(stderr || stdout || err.message);
+  }
+}
+
+function ensureGuardBlacklistSet() {
+  const target = detectGuardFirewallTable();
+
+  try {
+    execNft(['list', 'table', target.family, target.table]);
+  } catch (_) {
+    execNft(['add', 'table', target.family, target.table]);
+  }
+
+  try {
+    execNft(['list', 'chain', target.family, target.table, 'input']);
+  } catch (_) {
+    execNft(['add', 'chain', target.family, target.table, 'input', '{', 'type', 'filter', 'hook', 'input', 'priority', '0;', 'policy', 'accept;', '}']);
+  }
+
+  try {
+    execNft(['list', 'set', target.family, target.table, 'blacklist']);
+  } catch (_) {
+    execNft(['add', 'set', target.family, target.table, 'blacklist', '{', 'type', 'ipv4_addr;', 'flags', 'dynamic,timeout;', 'timeout', '24h;', '}']);
+  }
+
+  try {
+    execNft(['list', 'chain', target.family, target.table, 'input']);
+    const inputRules = execNft(['list', 'chain', target.family, target.table, 'input']);
+    if (!inputRules.includes('ip saddr @blacklist drop')) {
+      execNft(['insert', 'rule', target.family, target.table, 'input', 'ip', 'saddr', '@blacklist', 'drop']);
+    }
+  } catch (err) {
+    throw new Error(`Unable to ensure guard blacklist rule: ${err.message}`);
+  }
+
+  return target;
+}
+
+function listGuardBlockedIps() {
+  const target = ensureGuardBlacklistSet();
+  const output = execNft(['list', 'set', target.family, target.table, 'blacklist']);
+  const ips = [...new Set(output.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || [])];
+  return { ...target, ips, output };
+}
+
+function addGuardBlockedIp(ip) {
+  const safeIp = assertValidIpv4(ip);
+  const target = ensureGuardBlacklistSet();
+  execNft(['add', 'element', target.family, target.table, 'blacklist', `{ ${safeIp} }`]);
+  return listGuardBlockedIps();
+}
+
+function removeGuardBlockedIp(ip) {
+  const safeIp = assertValidIpv4(ip);
+  const target = ensureGuardBlacklistSet();
+  execNft(['delete', 'element', target.family, target.table, 'blacklist', `{ ${safeIp} }`]);
+  return listGuardBlockedIps();
+}
+
+async function syncTunnelProfileStatus(agentId, nextStatus, clientIp = null) {
+  if (!ADMIN_FEATURES_ENABLED) return;
+  if (!db.profileTunnelStatus) db.profileTunnelStatus = {};
+  if (db.profileTunnelStatus[agentId] === nextStatus) return;
+
+  db.profileTunnelStatus[agentId] = nextStatus;
+  const payload = { tunnel_status: nextStatus };
+  if (clientIp) payload.client_ip = clientIp;
+  await supabaseAdmin.from('user_profiles').update(payload).eq('agent_id', agentId);
+}
 
 // Middleware
 const authMiddleware = async (req, res, next) => {
@@ -248,6 +440,48 @@ app.post('/api/admin/reject', authMiddleware, adminMiddleware, privilegedSupabas
   const { error } = await supabaseAdmin.from('user_profiles').update({ status: 'rejected' }).eq('id', id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true });
+});
+
+app.get('/api/guard/blocklist', authMiddleware, (req, res) => {
+  try {
+    const result = listGuardBlockedIps();
+    res.json({
+      ips: result.ips,
+      table: `${result.family} ${result.table}`,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to read guard blocklist.' });
+  }
+});
+
+app.post('/api/guard/blocklist', authMiddleware, (req, res) => {
+  try {
+    const ip = assertValidIpv4(req.body?.ip);
+    const result = addGuardBlockedIp(ip);
+    broadcastGlobalBan(ip);
+    res.json({
+      success: true,
+      ips: result.ips,
+      table: `${result.family} ${result.table}`,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Failed to ban IP on guard firewall.' });
+  }
+});
+
+app.delete('/api/guard/blocklist/:ip', authMiddleware, (req, res) => {
+  try {
+    const ip = assertValidIpv4(req.params.ip);
+    const result = removeGuardBlockedIp(ip);
+    broadcastGlobalUnban(ip);
+    res.json({
+      success: true,
+      ips: result.ips,
+      table: `${result.family} ${result.table}`,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Failed to unban IP on guard firewall.' });
+  }
 });
 
 // Agent Installer Download
@@ -511,6 +745,11 @@ SBS_API_KEY=${req.user.api_key}
 SBS_ENABLE_TUNNEL=0
 EOF
 
+cat << 'EOF' > /opt/sbs-agent/setup-tunnel-client.sh
+${CLIENT_TUNNEL_SCRIPT_SOURCE}
+EOF
+chmod +x /opt/sbs-agent/setup-tunnel-client.sh
+
 mkdir -p /var/log/sbs
 touch /var/log/sbs/attacks.log
 touch /var/log/sbs/agent.log
@@ -567,8 +806,13 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
+cat << 'EOF' > /etc/systemd/system/sbs-tunnel.service
+${CLIENT_TUNNEL_SERVICE_UNIT}
+EOF
+
 systemctl daemon-reload
 systemctl enable sbs-agent
+systemctl disable sbs-tunnel 2>/dev/null || true
 systemctl restart sbs-agent
 
 echo "SBS Agent installed successfully!"
@@ -600,12 +844,24 @@ app.post('/api/agent/stats', agentAuthMiddleware, (req, res) => {
   const { agentId } = req.user;
   const requestIp = normalizeIp(req.headers['x-forwarded-for'] || req.socket.remoteAddress);
   const stats = req.body;
+  const tunnelName = stats?.tunnelName || getTunnelInterfaceName(agentId);
+  const tunnelPresent = Boolean(stats?.tunnelPresent);
   const agent = upsertAgentState(agentId, {
     userId: req.user.id,
     ip: requestIp,
     stats,
-    tunnelName: stats?.tunnelName || getTunnelInterfaceName(agentId),
-    tunnelPresent: Boolean(stats?.tunnelPresent)
+    tunnelName,
+    tunnelPresent
+  });
+
+  const guardState = readGuardTunnelState(agentId);
+  const hasExpectedTunnel = Boolean(getTunnelConfig(agentId));
+  const nextTunnelStatus = guardState.exists && tunnelPresent
+    ? 'active'
+    : (guardState.exists || tunnelPresent || hasExpectedTunnel ? 'degraded' : 'inactive');
+
+  syncTunnelProfileStatus(agentId, nextTunnelStatus, requestIp).catch((err) => {
+    console.error(`[tunnel] failed to sync profile status for ${agentId}:`, err.message);
   });
 
   // Cache the latest stats per user so the frontend can fetch them on page load
@@ -703,13 +959,21 @@ async function setupTunnel(req, res, agentId, clientIp) {
     return res.status(400).json({ error: 'Could not determine client IP. Please ensure agent is connected.' });
   }
 
+  if (!db.agents[agentId]) {
+    return res.status(409).json({ error: 'Tunnel setup requires the agent to be connected so the client service can be provisioned.' });
+  }
+
   try {
-    const { execSync } = require('child_process');
-    const guardPubIp = execSync('curl -s https://api.ipify.org || curl -s ifconfig.me').toString().trim();
+    const guardPubIp = resolveGuardPublicIp(req);
+    const tunnelConfig = getOrAllocateTunnelConfig(agentId, {
+      userId: req.user.id,
+      clientPublicIp: clientIp,
+      guardPublicIp: guardPubIp,
+    });
       
     // 1. Setup Guard side
     console.log(`[tunnel] Setting up guard for agent ${agentId} at ${clientIp}...`);
-    const tunnelRun = runTunnelManager('add', agentId, clientIp);
+    const tunnelRun = runTunnelManager('add', tunnelConfig);
     console.log(`[tunnel] Guard tunnel manager used: ${tunnelRun.scriptPath}`);
     const guardState = readGuardTunnelState(agentId);
     if (!guardState.exists) {
@@ -721,26 +985,7 @@ async function setupTunnel(req, res, agentId, clientIp) {
     
     // Construct the command to setup the client tunnel
     // We use a one-liner to create the GRE tunnel on the client
-    const tunnelName = `gre_${agentId.substring(0, 8)}`;
-    const clientCmd = `
-      LOG_FILE=/var/log/sbs/agent.log;
-      {
-        echo "[tunnel] starting client tunnel ${tunnelName}";
-        LOCAL_IP=$(ip route get ${guardPubIp} | awk '/src/ {for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}');
-        if [ -z "$LOCAL_IP" ]; then
-          echo "[tunnel] unable to determine client local IP for ${guardPubIp}";
-          exit 1;
-        fi
-        ip tunnel del ${tunnelName} 2>/dev/null || true;
-        ip tunnel add ${tunnelName} mode gre remote ${guardPubIp} local "$LOCAL_IP" ttl 255;
-        ip addr replace 10.0.0.2/30 dev ${tunnelName};
-        ip link set ${tunnelName} up;
-        ip route replace 10.0.0.1 dev ${tunnelName};
-        echo "[tunnel] client interface ${tunnelName} is up using local $LOCAL_IP";
-      } >> "$LOG_FILE" 2>&1
-    `.replace(/\n/g, ' ').trim();
-
-    commandQueue[agentId].push({ id: crypto.randomUUID(), cmd: clientCmd });
+    commandQueue[agentId].push({ id: crypto.randomUUID(), cmd: buildClientTunnelBootstrapCommand(tunnelConfig) });
 
       // 3. Update Supabase
       await supabaseAdmin.from('user_profiles')
@@ -750,8 +995,20 @@ async function setupTunnel(req, res, agentId, clientIp) {
           tunnel_created_at: new Date().toISOString()
         })
         .eq('agent_id', agentId);
+
+      if (!db.profileTunnelStatus) db.profileTunnelStatus = {};
+      db.profileTunnelStatus[agentId] = 'provisioning';
   
-      res.json({ success: true, guardIp: guardPubIp, tunnelName: guardState.tunnelName, status: 'provisioning' });
+      res.json({
+        success: true,
+        guardIp: guardPubIp,
+        tunnelName: guardState.tunnelName,
+        guardTunnelIp: tunnelConfig.guardTunnelIp,
+        clientTunnelIp: tunnelConfig.clientTunnelIp,
+        subnet: tunnelConfig.subnet,
+        status: 'provisioning',
+        statePath: tunnelConfig.statePath,
+      });
   } catch (err) {
     console.error(`[tunnel] Tunnel creation failed for agent ${agentId}:`, err);
     res.status(500).json({ 
@@ -763,10 +1020,10 @@ async function setupTunnel(req, res, agentId, clientIp) {
 }
 
 function getTunnelInterfaceName(agentId) {
-  return `gre_${String(agentId || '').substring(0, 8)}`;
+  return tunnelNameForAgent(agentId);
 }
 
-function runTunnelManager(action, agentId, clientIp) {
+function runTunnelManager(action, tunnelConfig) {
   const { execFileSync } = require('child_process');
   const candidates = [
     '/opt/detroit-sbs/tunnel-manager.sh',
@@ -778,8 +1035,15 @@ function runTunnelManager(action, agentId, clientIp) {
     throw new Error('Tunnel manager script not found. Expected /opt/detroit-sbs/tunnel-manager.sh or local tunnel-manager.sh.');
   }
 
-  const bashArgs = [scriptPath, action, agentId];
-  if (clientIp) bashArgs.push(clientIp);
+  const bashArgs = [
+    scriptPath,
+    action,
+    tunnelConfig?.agentId || '',
+    tunnelConfig?.clientPublicIp || '',
+    tunnelConfig?.guardPublicIp || '',
+    tunnelConfig?.guardTunnelIp || '',
+    tunnelConfig?.clientTunnelIp || '',
+  ];
 
   const isRoot = typeof process.getuid === 'function' ? process.getuid() === 0 : false;
   const command = isRoot ? 'bash' : 'sudo';
@@ -791,13 +1055,21 @@ function runTunnelManager(action, agentId, clientIp) {
 
 function readGuardTunnelState(agentId) {
   const tunnelName = getTunnelInterfaceName(agentId);
+  const sysfsPath = path.join('/sys/class/net', tunnelName);
+
+  if (!fs.existsSync(sysfsPath)) {
+    return { exists: false, tunnelName, linkInfo: null };
+  }
 
   try {
-    const { execSync } = require('child_process');
-    const linkInfo = execSync(`ip -o link show ${tunnelName}`).toString().trim();
+    const { execFileSync } = require('child_process');
+    const linkInfo = execFileSync('ip', ['-o', 'link', 'show', tunnelName], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
     return { exists: true, tunnelName, linkInfo };
-  } catch (err) {
-    return { exists: false, tunnelName, linkInfo: null };
+  } catch (_) {
+    return { exists: true, tunnelName, linkInfo: null };
   }
 }
 
@@ -805,13 +1077,25 @@ app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddlew
   const { agent_id } = req.user;
   
   try {
-    const tunnelRun = runTunnelManager('remove', agent_id);
+    const tunnelConfig = getTunnelConfig(agent_id) || {
+      agentId: agent_id,
+      tunnelName: getTunnelInterfaceName(agent_id),
+    };
+
+    if (!commandQueue[agent_id]) commandQueue[agent_id] = [];
+    commandQueue[agent_id].push({ id: crypto.randomUUID(), cmd: buildClientTunnelRemovalCommand() });
+
+    const tunnelRun = runTunnelManager('remove', tunnelConfig);
     console.log(`[tunnel] Guard tunnel manager used: ${tunnelRun.scriptPath}`);
+    releaseTunnelConfig(agent_id);
     
     // Update Supabase
     await supabaseAdmin.from('user_profiles')
       .update({ tunnel_status: 'inactive' })
       .eq('agent_id', agent_id);
+
+    if (!db.profileTunnelStatus) db.profileTunnelStatus = {};
+    db.profileTunnelStatus[agent_id] = 'inactive';
 
     res.json({ success: true });
   } catch (err) {
@@ -827,13 +1111,14 @@ app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddlew
       const dbStatus = data?.tunnel_status || 'inactive';
       const systemState = readGuardTunnelState(agent_id);
       const clientState = db.agents[agent_id] || null;
+      const tunnelConfig = getTunnelConfig(agent_id);
       const clientTunnelPresent = Boolean(clientState?.tunnelPresent);
       const clientTunnelName = clientState?.tunnelName || getTunnelInterfaceName(agent_id);
       let status = 'inactive';
 
       if (systemState.exists && clientTunnelPresent) {
         status = 'active';
-      } else if (systemState.exists || clientTunnelPresent || dbStatus === 'active' || dbStatus === 'provisioning') {
+      } else if (systemState.exists || clientTunnelPresent || dbStatus === 'active' || dbStatus === 'provisioning' || tunnelConfig) {
         status = 'degraded';
       }
 
@@ -853,6 +1138,10 @@ app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddlew
         detail = 'Tunnel creation was queued and is still waiting for both sides to come up.';
       }
 
+      syncTunnelProfileStatus(agent_id, status, data?.client_ip || clientState?.ip || null).catch((err) => {
+        console.error(`[tunnel] failed to persist status for ${agent_id}:`, err.message);
+      });
+
       res.json({
         status,
         dbStatus,
@@ -863,6 +1152,10 @@ app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddlew
         clientTunnelName,
         syncMismatch,
         detail,
+        subnet: tunnelConfig?.subnet || null,
+        guardTunnelIp: tunnelConfig?.guardTunnelIp || null,
+        clientTunnelIp: tunnelConfig?.clientTunnelIp || null,
+        statePath: getTunnelStatePath(),
       });
     } catch (err) {
       res.status(500).json({ error: 'Failed to fetch status' });
@@ -881,10 +1174,21 @@ function broadcastGlobalBan(ip) {
     if (!commandQueue[agentId]) commandQueue[agentId] = [];
     commandQueue[agentId].push({ 
       id: crypto.randomUUID(), 
-      cmd: `nft add element inet detroit_guard blacklist '{ ${ip} }' 2>/dev/null || true`
+      cmd: `NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo detroit_guard || echo sbs_filter); nft add element inet $NFT_TABLE blacklist '{ ${ip} }' 2>/dev/null || true`
     });
   });
   console.log(`[global-ban] Syncing ${ip} to all agents.`);
+}
+
+function broadcastGlobalUnban(ip) {
+  Object.keys(db.agents).forEach(agentId => {
+    if (!commandQueue[agentId]) commandQueue[agentId] = [];
+    commandQueue[agentId].push({
+      id: crypto.randomUUID(),
+      cmd: `NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo detroit_guard || echo sbs_filter); nft delete element inet $NFT_TABLE blacklist '{ ${ip} }' 2>/dev/null || true`
+    });
+  });
+  console.log(`[global-ban] Removing ${ip} from connected agents.`);
 }
 
 // ── Websocket logic ──────────────────────────────────────────

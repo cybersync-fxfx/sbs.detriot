@@ -55,9 +55,10 @@ export default function Dashboard({ token }) {
   useEffect(() => {
     fetchTunnelStatus();
     if (!token) return undefined;
-    const id = setInterval(fetchTunnelStatus, 10000);
+    const pollMs = tunnelStatus === 'active' ? 10000 : 3000;
+    const id = setInterval(fetchTunnelStatus, pollMs);
     return () => clearInterval(id);
-  }, [token]);
+  }, [token, tunnelStatus]);
 
   // ── Build chart data objects from context history ─────────────────────────
   const cpuChartData = useMemo(() => ({

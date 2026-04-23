@@ -2,76 +2,51 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTelemetry } from '../context/TelemetryContext';
 
 const ipv4Pattern = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
-const NFT_CONTEXT = `NFT_FAMILY='inet'; NFT_TABLE='detroit_guard'`;
 
-function extractBlockedIps(output) {
-  const matches = output.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g);
-  return [...new Set(matches || [])];
-}
-
-function firstMeaningfulLine(output) {
-  return (output || '')
-    .split('\n')
-    .map((line) => line.trim())
-    .find(Boolean) || 'Unknown error';
-}
-
-export default function Blocklist() {
-  const { sendCommand, isConnected, commandReady } = useTelemetry();
+export default function Blocklist({ token }) {
+  const { isConnected } = useTelemetry();
 
   const [banInput, setBanInput] = useState('');
   const [ips, setIps] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [guardReady, setGuardReady] = useState(false);
+  const [guardTable, setGuardTable] = useState('inet detroit_guard');
   const [lastSync, setLastSync] = useState(null);
   const [feedback, setFeedback] = useState({ msg: '', type: '' });
   const [unbanning, setUnbanning] = useState(null);
   const intervalRef = useRef(null);
 
   const refresh = useCallback(async (silent = false) => {
-    if (!commandReady) return;
+    if (!token) return;
     if (!silent) setLoading(true);
 
     try {
-      const cmd = `
-        NFT_FAMILY='inet';
-        NFT_TABLE='detroit_guard';
-        if ! nft list table $NFT_FAMILY $NFT_TABLE >/dev/null 2>&1; then
-          nft add table $NFT_FAMILY $NFT_TABLE 2>/dev/null || true;
-        fi;
-        if ! nft list set $NFT_FAMILY $NFT_TABLE blacklist >/dev/null 2>&1; then
-          nft add set $NFT_FAMILY $NFT_TABLE blacklist '{ type ipv4_addr; flags dynamic,timeout; timeout 24h; }' 2>/dev/null || true;
-        fi;
-        nft list set $NFT_FAMILY $NFT_TABLE blacklist
-      `.replace(/\s+/g, ' ').trim();
+      const res = await fetch('/api/guard/blocklist', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load guard blocklist.');
 
-      const result = await sendCommand(cmd);
-      const output = result.output || '';
-
-      if (result.exitCode !== 0 && result.exitCode != null) {
-        setFeedback({
-          msg: `nft error (exit ${result.exitCode}): ${firstMeaningfulLine(output)}`,
-          type: 'danger'
-        });
-        return;
-      }
-
-      setIps(extractBlockedIps(output));
+      setIps(data.ips || []);
+      setGuardTable(data.table || 'inet detroit_guard');
+      setGuardReady(true);
       setLastSync(new Date());
       if (!silent) setFeedback({ msg: '', type: '' });
     } catch (err) {
+      setGuardReady(false);
       if (!silent) setFeedback({ msg: err.message, type: 'danger' });
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [commandReady, sendCommand]);
+  }, [token]);
 
   useEffect(() => {
-    if (!commandReady) return undefined;
+    if (!token) return undefined;
 
     refresh();
     intervalRef.current = setInterval(() => refresh(true), 15000);
     return () => clearInterval(intervalRef.current);
-  }, [commandReady, refresh]);
+  }, [token, refresh]);
 
   const banIp = async () => {
     const ip = banInput.trim();
@@ -84,23 +59,23 @@ export default function Blocklist() {
     setLoading(true);
 
     try {
-      const result = await sendCommand(
-        `${NFT_CONTEXT}; nft add element $NFT_FAMILY $NFT_TABLE blacklist '{ ${ip} }'; nft list set $NFT_FAMILY $NFT_TABLE blacklist`
-      );
-      const output = result.output || '';
+      const res = await fetch('/api/guard/blocklist', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ ip })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Failed to ban ${ip}.`);
 
-      if (result.exitCode !== 0 && result.exitCode != null) {
-        setFeedback({
-          msg: `Failed to ban ${ip}: ${firstMeaningfulLine(output)}`,
-          type: 'danger'
-        });
-        return;
-      }
-
-      setIps(extractBlockedIps(output));
+      setIps(data.ips || []);
+      setGuardTable(data.table || 'inet detroit_guard');
+      setGuardReady(true);
       setLastSync(new Date());
       setBanInput('');
-      setFeedback({ msg: `${ip} banned successfully.`, type: 'success' });
+      setFeedback({ msg: `${ip} banned on the guard firewall.`, type: 'success' });
     } catch (err) {
       setFeedback({ msg: err.message, type: 'danger' });
     } finally {
@@ -113,22 +88,18 @@ export default function Blocklist() {
     setFeedback({ msg: '', type: '' });
 
     try {
-      const result = await sendCommand(
-        `${NFT_CONTEXT}; nft delete element $NFT_FAMILY $NFT_TABLE blacklist '{ ${ip} }'; nft list set $NFT_FAMILY $NFT_TABLE blacklist`
-      );
-      const output = result.output || '';
+      const res = await fetch(`/api/guard/blocklist/${encodeURIComponent(ip)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Failed to unban ${ip}.`);
 
-      if (result.exitCode !== 0 && result.exitCode != null) {
-        setFeedback({
-          msg: `Failed to unban ${ip}: ${firstMeaningfulLine(output)}`,
-          type: 'danger'
-        });
-        return;
-      }
-
-      setIps(extractBlockedIps(output));
+      setIps(data.ips || []);
+      setGuardTable(data.table || 'inet detroit_guard');
+      setGuardReady(true);
       setLastSync(new Date());
-      setFeedback({ msg: `${ip} unbanned successfully.`, type: 'success' });
+      setFeedback({ msg: `${ip} removed from the guard firewall.`, type: 'success' });
     } catch (err) {
       setFeedback({ msg: err.message, type: 'danger' });
     } finally {
@@ -137,14 +108,14 @@ export default function Blocklist() {
   };
 
   const onKeyDown = (e) => {
-    if (e.key === 'Enter' && !loading && commandReady) {
+    if (e.key === 'Enter' && !loading && token) {
       banIp();
     }
   };
 
   const syncLabel = lastSync
     ? `Last synced ${lastSync.toLocaleTimeString()} - auto-refreshes every 15s`
-    : 'Fetching from firewall...';
+    : 'Fetching from guard firewall...';
 
   return (
     <div className="page-shell">
@@ -153,12 +124,15 @@ export default function Blocklist() {
           <p className="eyebrow">Security</p>
           <h1 className="page-title">Block List</h1>
           <p className="page-copy">
-            Live view of the blacklist managed through the connected SBS agent. Ban or unban IPs and keep the visible nftables set in sync.
+            Live view of the central guard blacklist. Ban or unban IPs on the guard firewall and propagate the change to connected agents.
           </p>
         </div>
         <div className="hero-status-stack">
-          <div className={`status-pill ${isConnected ? 'connected' : 'disconnected'}`}>
-            {isConnected ? 'Agent Reachable' : 'Agent Not Reachable'}
+          <div className={`status-pill ${guardReady ? 'connected' : 'disconnected'}`}>
+            {guardReady ? 'Guard Firewall Ready' : 'Guard Firewall Unreachable'}
+          </div>
+          <div className={`meta-chip ${isConnected ? '' : 'danger-text'}`}>
+            {isConnected ? 'Agent Reachable' : 'Agent Offline'}
           </div>
           <div className="meta-chip">
             {ips.length > 0 ? `${ips.length} IP${ips.length > 1 ? 's' : ''} blocked` : 'No IPs blocked'}
@@ -176,7 +150,7 @@ export default function Blocklist() {
               value={banInput}
               onChange={(e) => setBanInput(e.target.value)}
               onKeyDown={onKeyDown}
-              disabled={loading || !commandReady}
+              disabled={loading || !token}
               style={{ width: '100%', margin: 0 }}
             />
           </div>
@@ -185,7 +159,7 @@ export default function Blocklist() {
             className="danger"
             type="button"
             onClick={banIp}
-            disabled={loading || !commandReady}
+            disabled={loading || !token}
             style={{ whiteSpace: 'nowrap' }}
           >
             Ban IP
@@ -194,7 +168,7 @@ export default function Blocklist() {
             id="refresh-blocklist-btn"
             type="button"
             onClick={() => refresh(false)}
-            disabled={loading || !commandReady}
+            disabled={loading || !token}
             style={{ whiteSpace: 'nowrap' }}
           >
             {loading ? 'Loading...' : 'Refresh'}
@@ -202,6 +176,10 @@ export default function Blocklist() {
           <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
             {syncLabel}
           </span>
+        </div>
+
+        <div style={{ marginTop: '0.75rem', fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+          Guard set: <span className="font-mono">{guardTable}</span>
         </div>
 
         {feedback.msg && (
@@ -224,16 +202,16 @@ export default function Blocklist() {
           )}
         </div>
 
-        {!commandReady ? (
-          <div className="empty-state">Waiting for agent connection...</div>
+        {!guardReady && !loading ? (
+          <div className="empty-state">Waiting for the guard firewall to respond...</div>
         ) : loading && ips.length === 0 ? (
-          <div className="empty-state">Fetching blocked IPs from firewall...</div>
+          <div className="empty-state">Fetching blocked IPs from the guard firewall...</div>
         ) : ips.length === 0 ? (
           <div className="empty-state" style={{ padding: '2.5rem' }}>
             <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>OK</div>
-            <div>No IPs are currently blocked on the firewall.</div>
+            <div>No IPs are currently blocked on the guard firewall.</div>
             <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginTop: '0.4rem' }}>
-              Auto-ban activates when a DDoS attack is detected.
+              Global auto-ban and manual blacklist actions show up here in real time.
             </div>
           </div>
         ) : (
@@ -273,7 +251,7 @@ export default function Blocklist() {
                         type="button"
                         className="secondary-button small"
                         onClick={() => unbanIp(ip)}
-                        disabled={Boolean(unbanning) || loading || !commandReady}
+                        disabled={Boolean(unbanning) || loading || !token}
                       >
                         {unbanning === ip ? 'Removing...' : 'Unban'}
                       </button>
