@@ -124,6 +124,19 @@ export default function Dashboard({ token }) {
   }, [isConnected, ageSec]);
 
   const wsLabel = { open: 'WS OK', connecting: 'WS Connecting', reconnecting: 'WS Reconnecting', error: 'WS Error' }[wsState] || wsState;
+  const postureTunnelLabel =
+    tunnelStatus === 'loading' ? 'Checking' :
+    tunnelStatus === 'active' ? 'Active' :
+    tunnelStatus === 'degraded' ? 'Degraded' :
+    'Inactive';
+  const postureTunnelTone =
+    tunnelStatus === 'active' ? '' :
+    tunnelStatus === 'degraded' ? 'warning' :
+    'danger';
+  const commandChannelLabel = isConnected ? (wsState === 'open' ? 'Ready' : 'Degraded') : 'Waiting for agent';
+  const commandChannelTone = isConnected ? (wsState === 'open' ? '' : 'warning') : 'danger';
+  const firewallLabel = tunnelMeta?.clientTunnelPresent ? 'Tunnel-Enforced' : (isConnected ? 'Active' : 'Unknown');
+  const firewallTone = tunnelMeta?.clientTunnelPresent ? '' : (isConnected ? '' : 'danger');
 
   const statCards = [
     { label: 'Active Connections', value: stats.connections,                tone: 'blue' },
@@ -409,9 +422,9 @@ export default function Dashboard({ token }) {
           <div className="panel-heading"><div><p className="eyebrow">Protection</p><h3>Current Posture</h3></div></div>
           <div className="fact-list compact">
             <div className="fact-row"><span>Agent Presence</span><span className={`fact-value ${isConnected ? '' : 'danger'}`}>{isConnected ? 'Connected' : 'Offline'}</span></div>
-            <div className="fact-row"><span>Tunnel Routing</span><span className={`fact-value ${tunnelStatus === 'active' ? '' : 'danger'}`}>{tunnelStatus === 'loading' ? '...' : tunnelStatus === 'active' ? 'Active' : 'Inactive'}</span></div>
-            <div className="fact-row"><span>Command Channel</span><span className={`fact-value ${isConnected ? '' : 'danger'}`}>{isConnected ? 'Ready' : 'Waiting for agent'}</span></div>
-            <div className="fact-row"><span>Firewall Status</span><span className={`fact-value ${isConnected ? '' : 'danger'}`}>{isConnected ? 'Active' : 'Unknown'}</span></div>
+            <div className="fact-row"><span>Tunnel Routing</span><span className={`fact-value ${postureTunnelTone}`}>{postureTunnelLabel}</span></div>
+            <div className="fact-row"><span>Command Channel</span><span className={`fact-value ${commandChannelTone}`}>{commandChannelLabel}</span></div>
+            <div className="fact-row"><span>Firewall Status</span><span className={`fact-value ${firewallTone}`}>{firewallLabel}</span></div>
           </div>
         </article>
       </section>

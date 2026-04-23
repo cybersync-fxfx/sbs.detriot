@@ -129,19 +129,29 @@ const privilegedSupabaseMiddleware = (req, res, next) => {
 };
 
 const agentAuthMiddleware = async (req, res, next) => {
-  const agentId = (req.body && req.body.agentId) || (req.query && req.query.agentId);
-  const apiKey = (req.body && req.body.apiKey) || (req.query && req.query.apiKey);
-  if (!agentId || !apiKey) return res.status(401).json({ error: 'Missing agent credentials' });
-  
-  // Call the Supabase RPC function (Security Definer) to securely verify the API key
-  const { data: userId, error } = await supabase.rpc('verify_agent', { p_agent_id: agentId, p_api_key: apiKey });
-  
-  if (error || !userId) {
-    return res.status(401).json({ error: 'Invalid agent credentials' });
+  try {
+    const body = (req && req.body && typeof req.body === 'object') ? req.body : {};
+    const query = (req && req.query && typeof req.query === 'object') ? req.query : {};
+    const agentId = body.agentId || query.agentId;
+    const apiKey = body.apiKey || query.apiKey;
+
+    if (!agentId || !apiKey) {
+      return res.status(401).json({ error: 'Missing agent credentials' });
+    }
+    
+    // Call the Supabase RPC function (Security Definer) to securely verify the API key
+    const { data: userId, error } = await supabase.rpc('verify_agent', { p_agent_id: agentId, p_api_key: apiKey });
+    
+    if (error || !userId) {
+      return res.status(401).json({ error: 'Invalid agent credentials' });
+    }
+    
+    req.user = { id: userId, agentId };
+    next();
+  } catch (err) {
+    console.error('[agent-auth] middleware failed:', err);
+    return res.status(400).json({ error: 'Malformed agent request' });
   }
-  
-  req.user = { id: userId, agentId };
-  next();
 };
 
 // Routes
