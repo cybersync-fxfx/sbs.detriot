@@ -661,12 +661,24 @@ app.post('/api/command', authMiddleware, (req, res) => {
 });
 
 
-// GRE Tunnel Endpoints
+// GRE Tunnel Endpoints (User triggered)
+app.post('/api/me/tunnel/create', authMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
+  const agentId = req.user.agent_id;
+  const clientIp = db.agents[agentId]?.ip || normalizeIp(req.headers['x-forwarded-for'] || req.socket.remoteAddress);
+  return setupTunnel(req, res, agentId, clientIp);
+});
+
+// GRE Tunnel Endpoints (Agent triggered)
 app.post('/api/agent/tunnel/create', agentAuthMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
-  const agentId = req.body.agentId || req.user.agentId;
+  const agentId = req.user.agentId;
   const clientIp = normalizeIp(req.body.clientIp || req.headers['x-forwarded-for'] || req.socket.remoteAddress);
-  
-  if (!clientIp) return res.status(400).json({ error: 'Missing clientIp' });
+  return setupTunnel(req, res, agentId, clientIp);
+});
+
+async function setupTunnel(req, res, agentId, clientIp) {
+  if (!clientIp || clientIp === 'auto') {
+    return res.status(400).json({ error: 'Could not determine client IP. Please ensure agent is connected.' });
+  }
 
   try {
     const { execSync } = require('child_process');

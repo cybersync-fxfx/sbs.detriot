@@ -114,7 +114,7 @@ export default function Dashboard({ token }) {
 
   const handleCreateTunnel = async () => {
     try {
-      const res = await fetch('/api/agent/tunnel/create', {
+      const res = await fetch('/api/me/tunnel/create', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
