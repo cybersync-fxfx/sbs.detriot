@@ -441,6 +441,9 @@ function sendStats() {
           ...attackLines.filter(l => l.trim()).map(l => '[FW]  ' + l.trim()),
         ].join('\\n');
 
+        const tunnelName = 'gre_' + String(config.agentId || '').substring(0, 8);
+        const tunnelPresent = fs.existsSync('/sys/class/net/' + tunnelName);
+
         makeRequest('/api/agent/stats', 'POST', {
           agentId:    config.agentId,
           apiKey:     config.apiKey,
@@ -457,6 +460,8 @@ function sendStats() {
           udpConns: parseInt(lines[6]) || 0,
           log:   logOutput,
           iface: netNow.iface,
+          tunnelName,
+          tunnelPresent,
         });
       }
     );
@@ -584,12 +589,14 @@ app.post('/api/agent/register', agentAuthMiddleware, (req, res) => {
 app.post('/api/agent/stats', agentAuthMiddleware, (req, res) => {
   const { agentId } = req.user;
   const requestIp = normalizeIp(req.headers['x-forwarded-for'] || req.socket.remoteAddress);
+  const stats = req.body;
   const agent = upsertAgentState(agentId, {
     userId: req.user.id,
-    ip: requestIp
+    ip: requestIp,
+    stats,
+    tunnelName: stats?.tunnelName || getTunnelInterfaceName(agentId),
+    tunnelPresent: Boolean(stats?.tunnelPresent)
   });
-  
-  const stats = req.body;
 
   // Cache the latest stats per user so the frontend can fetch them on page load
   if (!db.lastStats) db.lastStats = {};
@@ -689,11 +696,15 @@ async function setupTunnel(req, res, agentId, clientIp) {
   try {
     const { execSync } = require('child_process');
     const guardPubIp = execSync('curl -s https://api.ipify.org || curl -s ifconfig.me').toString().trim();
-    
+      
     // 1. Setup Guard side
     console.log(`[tunnel] Setting up guard for agent ${agentId} at ${clientIp}...`);
     execSync(`sudo /opt/detroit-sbs/tunnel-manager.sh add ${agentId} ${clientIp}`);
-    
+    const guardState = readGuardTunnelState(agentId);
+    if (!guardState.exists) {
+      throw new Error(`Guard tunnel interface ${guardState.tunnelName} was not created.`);
+    }
+      
     // 2. Queue command for Client side
     if (!commandQueue[agentId]) commandQueue[agentId] = [];
     
@@ -721,16 +732,16 @@ async function setupTunnel(req, res, agentId, clientIp) {
 
     commandQueue[agentId].push({ id: crypto.randomUUID(), cmd: clientCmd });
 
-    // 3. Update Supabase
-    await supabaseAdmin.from('user_profiles')
-      .update({ 
-        tunnel_status: 'active', 
-        client_ip: clientIp,
-        tunnel_created_at: new Date().toISOString()
-      })
-      .eq('agent_id', agentId);
-
-    res.json({ success: true, guardIp: guardPubIp });
+      // 3. Update Supabase
+      await supabaseAdmin.from('user_profiles')
+        .update({ 
+          tunnel_status: 'provisioning', 
+          client_ip: clientIp,
+          tunnel_created_at: new Date().toISOString()
+        })
+        .eq('agent_id', agentId);
+  
+      res.json({ success: true, guardIp: guardPubIp, tunnelName: guardState.tunnelName, status: 'provisioning' });
   } catch (err) {
     console.error(`[tunnel] Tunnel creation failed for agent ${agentId}:`, err);
     res.status(500).json({ 
@@ -776,34 +787,54 @@ app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddlew
   }
 });
 
-app.get('/api/agent/tunnel/status', authMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
-  const { agent_id } = req.user;
-  try {
-    const { data } = await supabaseAdmin.from('user_profiles').select('tunnel_status, client_ip').eq('agent_id', agent_id).single();
-    const dbStatus = data?.tunnel_status || 'inactive';
-    const systemState = readGuardTunnelState(agent_id);
-    let status = dbStatus;
+  app.get('/api/agent/tunnel/status', authMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
+    const { agent_id } = req.user;
+    try {
+      const { data } = await supabaseAdmin.from('user_profiles').select('tunnel_status, client_ip').eq('agent_id', agent_id).single();
+      const dbStatus = data?.tunnel_status || 'inactive';
+      const systemState = readGuardTunnelState(agent_id);
+      const clientState = db.agents[agent_id] || null;
+      const clientTunnelPresent = Boolean(clientState?.tunnelPresent);
+      const clientTunnelName = clientState?.tunnelName || getTunnelInterfaceName(agent_id);
+      let status = 'inactive';
 
-    if (systemState.exists) {
-      status = 'active';
-    } else if (dbStatus === 'active') {
-      status = 'degraded';
-    } else {
-      status = 'inactive';
+      if (systemState.exists && clientTunnelPresent) {
+        status = 'active';
+      } else if (systemState.exists || clientTunnelPresent || dbStatus === 'active' || dbStatus === 'provisioning') {
+        status = 'degraded';
+      }
+
+      const syncMismatch =
+        (systemState.exists && !clientTunnelPresent) ||
+        (!systemState.exists && clientTunnelPresent) ||
+        (dbStatus === 'inactive' && (systemState.exists || clientTunnelPresent));
+
+      let detail = 'No tunnel interfaces detected.';
+      if (systemState.exists && clientTunnelPresent) {
+        detail = 'Guard and client tunnel interfaces are both present.';
+      } else if (clientTunnelPresent && !systemState.exists) {
+        detail = 'Client tunnel exists, but guard tunnel interface is missing.';
+      } else if (!clientTunnelPresent && systemState.exists) {
+        detail = 'Guard tunnel exists, but client tunnel interface is missing.';
+      } else if (dbStatus === 'provisioning') {
+        detail = 'Tunnel creation was queued and is still waiting for both sides to come up.';
+      }
+
+      res.json({
+        status,
+        dbStatus,
+        clientIp: data?.client_ip || null,
+        tunnelName: systemState.tunnelName,
+        guardInterfacePresent: systemState.exists,
+        clientTunnelPresent,
+        clientTunnelName,
+        syncMismatch,
+        detail,
+      });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to fetch status' });
     }
-
-    res.json({
-      status,
-      dbStatus,
-      clientIp: data?.client_ip || null,
-      tunnelName: systemState.tunnelName,
-      guardInterfacePresent: systemState.exists,
-      syncMismatch: systemState.exists && dbStatus === 'inactive',
-    });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch status' });
-  }
-});
+  });
 
 // ── Radar Scanner Integration ────────────────────────────────
 const RadarScanner = require('./radar-scanner');

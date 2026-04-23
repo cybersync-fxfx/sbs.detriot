@@ -146,7 +146,7 @@ export default function Dashboard({ token }) {
       console.log('[Tunnel] Creation response:', res.status, data);
 
       if (res.ok) {
-        alert('Tunnel creation initiated. Guard-side setup has started and the connected agent has been queued for client-side tunnel setup.');
+        alert('Tunnel setup queued. This only confirms the job was accepted. The tunnel will show active after both the guard and client interfaces are up.');
         fetchTunnelStatus();
       } else {
         alert('Failed: ' + (data.error || 'Unknown error'));
@@ -207,7 +207,10 @@ export default function Dashboard({ token }) {
     { label: 'Guard Host', value: window.location.hostname },
     { label: 'Telemetry',  value: telemetryLabel },
     { label: 'WebSocket',  value: wsLabel },
-    { label: 'Tunnel Sync', value: tunnelMeta?.syncMismatch ? 'DB out of sync' : 'OK' },
+    { label: 'Guard Tunnel', value: tunnelMeta ? (tunnelMeta.guardInterfacePresent ? 'present' : 'missing') : 'unknown' },
+    { label: 'Client Tunnel', value: tunnelMeta ? (tunnelMeta.clientTunnelPresent ? 'present' : 'missing') : 'unknown' },
+    { label: 'Tunnel Sync', value: tunnelMeta?.syncMismatch ? 'mismatch' : 'OK' },
+    { label: 'Tunnel Detail', value: tunnelMeta?.detail || 'Waiting for tunnel status...' },
   ];
 
   // ── IP/Port chip parser ───────────────────────────────────────────────────

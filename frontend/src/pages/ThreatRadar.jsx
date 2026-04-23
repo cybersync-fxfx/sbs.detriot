@@ -72,8 +72,9 @@ export default function ThreatRadar({ token }) {
         <section className={`callout-banner ${setupRequired ? 'warning' : 'danger'}`}>
           <strong>{setupRequired ? 'Threat Radar setup required.' : 'Threat Radar unavailable.'}</strong>
           <span>
-            {error}
-            {setupRequired ? ' Run supabase_threat_radar.sql in your Supabase SQL editor, then reload this page.' : ''}
+            {setupRequired
+              ? 'Threat Radar database tables are missing. Run supabase_threat_radar.sql in your Supabase SQL editor, then reload this page.'
+              : error}
           </span>
         </section>
       ) : null}
