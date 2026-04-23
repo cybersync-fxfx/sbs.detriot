@@ -32,10 +32,17 @@ export default function Dashboard({ token }) {
 
   const fetchTunnelStatus = () => {
     if (!token) return;
+    console.log('[Tunnel] Fetching status...');
     fetch('/api/agent/tunnel/status', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
-      .then(d => setTunnelStatus(d.status || 'inactive'))
-      .catch(() => setTunnelStatus('inactive'));
+      .then(d => {
+        console.log('[Tunnel] Status received:', d);
+        setTunnelStatus(d.status || 'inactive');
+      })
+      .catch((err) => {
+        console.error('[Tunnel] Status fetch failed:', err);
+        setTunnelStatus('inactive');
+      });
   };
 
   useEffect(() => {
@@ -116,6 +123,7 @@ export default function Dashboard({ token }) {
   ];
 
   const handleCreateTunnel = async () => {
+    console.log('[Tunnel] Initiate creation command');
     try {
       const res = await fetch('/api/me/tunnel/create', {
         method: 'POST',
@@ -124,14 +132,17 @@ export default function Dashboard({ token }) {
           'Content-Type': 'application/json'
         }
       });
+      const data = await res.json();
+      console.log('[Tunnel] Creation response:', res.status, data);
+
       if (res.ok) {
         alert('Tunnel creation initiated! The agent will receive the command shortly.');
         fetchTunnelStatus();
       } else {
-        const err = await res.json();
-        alert('Failed: ' + (err.error || 'Unknown error'));
+        alert('Failed: ' + (data.error || 'Unknown error'));
       }
     } catch (e) {
+      console.error('[Tunnel] Creation error:', e);
       alert('Error connecting to server.');
     }
   };

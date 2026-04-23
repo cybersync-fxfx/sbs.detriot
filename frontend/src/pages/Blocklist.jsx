@@ -26,8 +26,10 @@ export default function Blocklist() {
   const refresh = useCallback(async (silent = false) => {
     if (!commandReady) return;
     if (!silent) setLoading(true);
+    console.log('[Blocklist] Refreshing... silent:', silent);
     try {
       const result = await sendCommand(`${NFT_DETECT}; nft list set $NFT_TABLE blacklist`);
+      console.log('[Blocklist] Refresh result:', result);
       const output = result.output || '';
       if (result.exitCode !== 0 && result.exitCode != null) {
         setFeedback({ msg: `nft error (exit ${result.exitCode})`, type: 'danger' });
@@ -37,6 +39,7 @@ export default function Blocklist() {
       setLastSync(new Date());
       if (!silent) setFeedback({ msg: '', type: '' });
     } catch (err) {
+      console.error('[Blocklist] Refresh error:', err);
       if (!silent) setFeedback({ msg: err.message, type: 'danger' });
     } finally {
       if (!silent) setLoading(false);
@@ -61,9 +64,11 @@ export default function Blocklist() {
     setFeedback({ msg: '', type: '' });
     setLoading(true);
     try {
+      console.log('[Blocklist] Banning IP:', ip);
       const result = await sendCommand(
         `${NFT_DETECT}; nft add element $NFT_TABLE blacklist { ${ip} } && nft list set $NFT_TABLE blacklist`
       );
+      console.log('[Blocklist] Ban result:', result);
       const output = result.output || '';
       if (result.exitCode !== 0 && result.exitCode != null) {
         setFeedback({ msg: `Failed to ban ${ip}. Check if nftables is running.`, type: 'danger' });
@@ -74,6 +79,7 @@ export default function Blocklist() {
       setBanInput('');
       setFeedback({ msg: `✓ ${ip} banned successfully.`, type: 'success' });
     } catch (err) {
+      console.error('[Blocklist] Ban error:', err);
       setFeedback({ msg: err.message, type: 'danger' });
     } finally {
       setLoading(false);
@@ -85,9 +91,11 @@ export default function Blocklist() {
     setUnbanning(ip);
     setFeedback({ msg: '', type: '' });
     try {
+      console.log('[Blocklist] Unbanning IP:', ip);
       const result = await sendCommand(
         `${NFT_DETECT}; nft delete element $NFT_TABLE blacklist { ${ip} } && nft list set $NFT_TABLE blacklist`
       );
+      console.log('[Blocklist] Unban result:', result);
       const output = result.output || '';
       if (result.exitCode !== 0 && result.exitCode != null) {
         setFeedback({ msg: `Failed to unban ${ip}.`, type: 'danger' });
@@ -97,6 +105,7 @@ export default function Blocklist() {
       setLastSync(new Date());
       setFeedback({ msg: `✓ ${ip} unbanned successfully.`, type: 'success' });
     } catch (err) {
+      console.error('[Blocklist] Unban error:', err);
       setFeedback({ msg: err.message, type: 'danger' });
     } finally {
       setUnbanning(null);
