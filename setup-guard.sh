@@ -6,7 +6,8 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-echo "[1/5] Enabling IP Forwarding for GRE Tunnels..."
+echo "[1/5] Enabling IP Forwarding and WireGuard dependencies..."
+apt-get update -qq && apt-get install -y wireguard wireguard-tools
 echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-detroit-sbs.conf
 echo 'net.ipv4.conf.all.rp_filter=0' >> /etc/sysctl.d/99-detroit-sbs.conf
 echo 'net.ipv4.conf.default.rp_filter=0' >> /etc/sysctl.d/99-detroit-sbs.conf
@@ -71,8 +72,8 @@ table inet detroit_guard {
     # Allow allowed ports
     tcp dport { 22, 80, 443, 3000 } accept
 
-    # Allow GRE for tunnels
-    ip protocol gre accept
+    # Allow WireGuard for tunnels
+    udp dport 51820-51900 accept
 
     # Auto-ban SYN floods: >100 SYN/s from same IP = 24h ban
     tcp flags syn \

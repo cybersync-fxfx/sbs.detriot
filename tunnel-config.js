@@ -108,7 +108,7 @@ function saveTunnelState(state) {
 }
 
 function tunnelNameForAgent(agentId) {
-  return `gre_${String(agentId || '').substring(0, 8)}`;
+  return `sbs_${String(agentId || '').substring(0, 8)}`;
 }
 
 function getTunnelConfig(agentId) {

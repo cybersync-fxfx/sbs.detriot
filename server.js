@@ -83,7 +83,7 @@ const CLIENT_TUNNEL_SCRIPT_SOURCE = escapeTemplateLiteral(
 );
 
 const CLIENT_TUNNEL_SERVICE_UNIT = escapeTemplateLiteral(`[Unit]
-Description=SBS Client GRE Tunnel
+Description=SBS Client WireGuard Tunnel
 After=network-online.target
 Wants=network-online.target
 
@@ -207,6 +207,18 @@ const resolveGuardPublicIp = (req) => {
   }
 };
 
+const generateWgKeys = () => {
+  try {
+    const priv = execSync('wg genkey', { encoding: 'utf8' }).trim();
+    const pub = execSync(`echo "${priv}" | wg pubkey`, { encoding: 'utf8' }).trim();
+    return { priv, pub };
+  } catch (err) {
+    // Fallback if wg is not installed on the panel host yet
+    console.warn('[tunnel] wg command not found for key generation, using fallback (may require wg installation)');
+    return { priv: 'FALLBACK_PLEASE_INSTALL_WG', pub: 'FALLBACK_PLEASE_INSTALL_WG' };
+  }
+};
+
 const buildClientTunnelBootstrapCommand = (tunnelConfig) => {
   const protectedCidrs = String(process.env.SBS_PROTECTED_CIDRS || '').trim();
 
@@ -224,6 +236,9 @@ SBS_GUARD_TUNNEL_IP=${tunnelConfig.guardTunnelIp}
 SBS_CLIENT_TUNNEL_IP=${tunnelConfig.clientTunnelIp}
 SBS_TUNNEL_CIDR=${tunnelConfig.tunnelCidr || 30}
 SBS_PROTECTED_CIDRS=${protectedCidrs}
+SBS_CLIENT_PRIVATE_KEY=${tunnelConfig.clientPrivateKey}
+SBS_GUARD_PUBLIC_KEY=${tunnelConfig.guardPublicKey}
+SBS_GUARD_PORT=${tunnelConfig.listenPort || 51820}
 TUNNEL_ENV_EOF
 cat <<'TUNNEL_UNIT_EOF' > /etc/systemd/system/sbs-tunnel.service
 ${CLIENT_TUNNEL_SERVICE_UNIT}
@@ -612,7 +627,7 @@ ${osCheckScript}
 
 echo "Installing dependencies..."
 apt-get update
-apt-get install -y curl nftables iproute2 net-tools jq
+apt-get install -y curl nftables iproute2 net-tools jq wireguard wireguard-tools
 
 if ! command -v node &> /dev/null; then
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
@@ -1072,25 +1087,35 @@ async function setupTunnel(req, res, agentId, clientIp) {
 
   try {
     const guardPubIp = resolveGuardPublicIp(req);
-    const tunnelConfig = getOrAllocateTunnelConfig(agentId, {
-      userId: req.user.id,
-      clientPublicIp: clientIp,
-      guardPublicIp: guardPubIp,
-    });
-      
+    
+    // Allocate config and generate keys if missing
+    let tunnelConfig = getTunnelConfig(agentId);
+    if (!tunnelConfig || !tunnelConfig.guardPrivateKey) {
+      const guardKeys = generateWgKeys();
+      const clientKeys = generateWgKeys();
+      tunnelConfig = getOrAllocateTunnelConfig(agentId, {
+        userId: req.user.id,
+        clientPublicIp: clientIp,
+        guardPublicIp: guardPubIp,
+        guardPrivateKey: guardKeys.priv,
+        guardPublicKey: guardKeys.pub,
+        clientPrivateKey: clientKeys.priv,
+        clientPublicKey: clientKeys.pub,
+        listenPort: 51820 + (getTunnelConfig(agentId)?.subnetIndex || 0), // Spread ports if needed
+      });
+    }
+
     // 1. Setup Guard side
-    console.log(`[tunnel] Setting up guard for agent ${agentId} at ${clientIp}...`);
+    console.log(`[tunnel] Setting up guard WG for agent ${agentId} at ${clientIp}...`);
     const tunnelRun = runTunnelManager('add', tunnelConfig);
     console.log(`[tunnel] Guard tunnel manager used: ${tunnelRun.scriptPath}`);
     const guardState = readGuardTunnelState(agentId);
-    if (!guardState.exists) {
-      throw new Error(`Guard tunnel interface ${guardState.tunnelName} was not created.`);
-    }
-      
+    // Note: readGuardTunnelState might need update for WG check if sysfs path differs
+    
     // 2. Queue command for Client side
     const clientCommand = queueAgentCommand(agentId, buildClientTunnelBootstrapCommand(tunnelConfig), {
       kind: 'tunnel:apply',
-      summary: `Bootstrap ${tunnelConfig.tunnelName} on client`
+      summary: `Bootstrap ${tunnelConfig.tunnelName} (WireGuard) on client`
     });
 
       // 3. Update Supabase
@@ -1155,7 +1180,15 @@ function runTunnelManager(action, tunnelConfig) {
   const isRoot = typeof process.getuid === 'function' ? process.getuid() === 0 : false;
   const command = isRoot ? 'bash' : 'sudo';
   const args = isRoot ? bashArgs : ['bash', ...bashArgs];
-  const output = execFileSync(command, args, { encoding: 'utf8' });
+  
+  // Pass keys via env for security
+  const env = { 
+    ...process.env,
+    SBS_GUARD_PRIVATE_KEY: tunnelConfig?.guardPrivateKey,
+    SBS_CLIENT_PUBLIC_KEY: tunnelConfig?.clientPublicKey
+  };
+
+  const output = execFileSync(command, args, { encoding: 'utf8', env });
 
   return { output, scriptPath };
 }

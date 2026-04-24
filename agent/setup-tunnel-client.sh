@@ -3,6 +3,7 @@ set -euo pipefail
 
 ENV_FILE="${SBS_TUNNEL_ENV_FILE:-/opt/sbs-agent/tunnel.env}"
 LOG_FILE="${SBS_TUNNEL_LOG_FILE:-/var/log/sbs/agent.log}"
+CONFIG_DIR="/etc/wireguard"
 
 trim_cr() {
   printf '%s' "${1%$'\r'}"
@@ -15,6 +16,14 @@ log() {
   mkdir -p "$(dirname "$LOG_FILE")"
   touch "$LOG_FILE"
   printf '[%s] [tunnel] %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$message" | tee -a "$LOG_FILE" >/dev/null
+}
+
+# Ensure wireguard is installed
+ensure_wg() {
+  if ! command -v wg &>/dev/null; then
+    log "WireGuard not found. Installing..."
+    apt-get update -qq && apt-get install -y wireguard wireguard-tools >/dev/null
+  fi
 }
 
 trap 'rc=$?; if [ "$rc" -ne 0 ]; then log "action ${ACTION} failed while running: ${BASH_COMMAND} (exit ${rc})"; fi' ERR
@@ -36,45 +45,42 @@ load_env() {
   SBS_CLIENT_TUNNEL_IP="$(trim_cr "${SBS_CLIENT_TUNNEL_IP:-}")"
   SBS_TUNNEL_CIDR="$(trim_cr "${SBS_TUNNEL_CIDR:-30}")"
   SBS_PROTECTED_CIDRS="$(trim_cr "${SBS_PROTECTED_CIDRS:-}")"
+  
+  SBS_CLIENT_PRIVATE_KEY="$(trim_cr "${SBS_CLIENT_PRIVATE_KEY:-}")"
+  SBS_GUARD_PUBLIC_KEY="$(trim_cr "${SBS_GUARD_PUBLIC_KEY:-}")"
+  SBS_GUARD_PORT="$(trim_cr "${SBS_GUARD_PORT:-51820}")"
 
   : "${SBS_TUNNEL_NAME:?Missing SBS_TUNNEL_NAME}"
   : "${SBS_GUARD_PUBLIC_IP:?Missing SBS_GUARD_PUBLIC_IP}"
   : "${SBS_GUARD_TUNNEL_IP:?Missing SBS_GUARD_TUNNEL_IP}"
   : "${SBS_CLIENT_TUNNEL_IP:?Missing SBS_CLIENT_TUNNEL_IP}"
-}
-
-detect_local_ip() {
-  ip route get "$SBS_GUARD_PUBLIC_IP" | awk '/src/ {for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}'
+  : "${SBS_CLIENT_PRIVATE_KEY:?Missing SBS_CLIENT_PRIVATE_KEY}"
+  : "${SBS_GUARD_PUBLIC_KEY:?Missing SBS_GUARD_PUBLIC_KEY}"
 }
 
 apply_tunnel() {
+  ensure_wg
   load_env
-  local local_ip
-  local_ip="$(detect_local_ip)"
+  
+  local config_file="${CONFIG_DIR}/${SBS_TUNNEL_NAME}.conf"
+  log "applying ${SBS_TUNNEL_NAME} via WireGuard to ${SBS_GUARD_PUBLIC_IP}:${SBS_GUARD_PORT}"
+  
+  mkdir -p "$CONFIG_DIR"
+  cat <<EOF > "$config_file"
+[Interface]
+PrivateKey = ${SBS_CLIENT_PRIVATE_KEY}
+Address = ${SBS_CLIENT_TUNNEL_IP}/${SBS_TUNNEL_CIDR}
 
-  if [ -z "$local_ip" ]; then
-    log "unable to determine local public IP for guard $SBS_GUARD_PUBLIC_IP"
-    exit 1
-  fi
+[Peer]
+PublicKey = ${SBS_GUARD_PUBLIC_KEY}
+Endpoint = ${SBS_GUARD_PUBLIC_IP}:${SBS_GUARD_PORT}
+AllowedIPs = ${SBS_GUARD_TUNNEL_IP}/32${SBS_PROTECTED_CIDRS:+,}${SBS_PROTECTED_CIDRS//,/ }
+PersistentKeepalive = 25
+EOF
+  chmod 600 "$config_file"
 
-  log "applying ${SBS_TUNNEL_NAME} via ${local_ip} -> ${SBS_GUARD_PUBLIC_IP}"
-  ip tunnel del "$SBS_TUNNEL_NAME" 2>/dev/null || true
-  ip tunnel add "$SBS_TUNNEL_NAME" mode gre remote "$SBS_GUARD_PUBLIC_IP" local "$local_ip" ttl 255
-  ip addr replace "${SBS_CLIENT_TUNNEL_IP}/${SBS_TUNNEL_CIDR}" dev "$SBS_TUNNEL_NAME"
-  ip link set "$SBS_TUNNEL_NAME" up
-  ip route replace "${SBS_GUARD_TUNNEL_IP}/32" dev "$SBS_TUNNEL_NAME"
-
-  if [ -n "${SBS_PROTECTED_CIDRS:-}" ]; then
-    OLD_IFS="$IFS"
-    IFS=','
-    for subnet in $SBS_PROTECTED_CIDRS; do
-      subnet="$(echo "$subnet" | xargs)"
-      if [ -n "$subnet" ]; then
-        ip route replace "$subnet" via "$SBS_GUARD_TUNNEL_IP" dev "$SBS_TUNNEL_NAME"
-      fi
-    done
-    IFS="$OLD_IFS"
-  fi
+  wg-quick down "$SBS_TUNNEL_NAME" 2>/dev/null || true
+  wg-quick up "$SBS_TUNNEL_NAME"
 
   log "interface ${SBS_TUNNEL_NAME} is ready with ${SBS_CLIENT_TUNNEL_IP}/${SBS_TUNNEL_CIDR}"
 }
@@ -83,8 +89,8 @@ remove_tunnel() {
   if [ -f "$ENV_FILE" ]; then
     load_env
     log "removing ${SBS_TUNNEL_NAME}"
-    ip link set "$SBS_TUNNEL_NAME" down 2>/dev/null || true
-    ip tunnel del "$SBS_TUNNEL_NAME" 2>/dev/null || true
+    wg-quick down "$SBS_TUNNEL_NAME" 2>/dev/null || true
+    rm -f "${CONFIG_DIR}/${SBS_TUNNEL_NAME}.conf"
   fi
 }
 
