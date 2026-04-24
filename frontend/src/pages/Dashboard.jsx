@@ -125,6 +125,7 @@ export default function Dashboard({ token }) {
   }, [isConnected, ageSec]);
 
   const wsLabel = { open: 'WS OK', connecting: 'WS Connecting', reconnecting: 'WS Reconnecting', error: 'WS Error' }[wsState] || wsState;
+  const latestTunnelJob = tunnelMeta?.lastTunnelCommand || null;
   const postureTunnelLabel =
     tunnelStatus === 'loading' ? 'Checking' :
     tunnelStatus === 'active' ? 'Active' :
@@ -171,11 +172,18 @@ export default function Dashboard({ token }) {
     }
   };
 
+  const tunnelJobLabel = latestTunnelJob
+    ? `${latestTunnelJob.status}${typeof latestTunnelJob.exitCode === 'number' ? ` (${latestTunnelJob.exitCode})` : ''}`
+    : 'none';
+  const tunnelJobOutput = latestTunnelJob?.output
+    ? latestTunnelJob.output.slice(0, 180)
+    : 'No tunnel job output yet.';
+
   const getTunnelDisplay = () => {
-    if (tunnelStatus === 'inactive') {
+    if (tunnelStatus === 'inactive' || tunnelStatus === 'degraded') {
       return (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span className="fact-value danger">inactive</span>
+          <span className={`fact-value ${tunnelStatus === 'degraded' ? 'warning' : 'danger'}`}>{tunnelStatus}</span>
           <button 
             className="secondary-button" 
             style={{ 
@@ -194,7 +202,7 @@ export default function Dashboard({ token }) {
             }}
             onClick={handleCreateTunnel}
           >
-            SETUP TUNNEL
+            {tunnelStatus === 'degraded' ? 'RETRY TUNNEL' : 'SETUP TUNNEL'}
           </button>
         </div>
       );
@@ -225,6 +233,8 @@ export default function Dashboard({ token }) {
     { label: 'Client Tunnel', value: tunnelMeta ? (tunnelMeta.clientTunnelPresent ? 'present' : 'missing') : 'unknown' },
     { label: 'Tunnel Sync', value: tunnelMeta?.syncMismatch ? 'mismatch' : 'OK' },
     { label: 'Tunnel Detail', value: tunnelMeta?.detail || 'Waiting for tunnel status...' },
+    { label: 'Tunnel Job', value: tunnelJobLabel },
+    { label: 'Tunnel Job Detail', value: tunnelJobOutput },
   ];
 
   // ── IP/Port chip parser ───────────────────────────────────────────────────

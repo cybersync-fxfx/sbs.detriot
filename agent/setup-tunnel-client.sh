@@ -4,12 +4,20 @@ set -euo pipefail
 ENV_FILE="${SBS_TUNNEL_ENV_FILE:-/opt/sbs-agent/tunnel.env}"
 LOG_FILE="${SBS_TUNNEL_LOG_FILE:-/var/log/sbs/agent.log}"
 
+trim_cr() {
+  printf '%s' "${1%$'\r'}"
+}
+
+ACTION="$(trim_cr "${1:---apply}")"
+
 log() {
   local message="$1"
   mkdir -p "$(dirname "$LOG_FILE")"
   touch "$LOG_FILE"
   printf '[%s] [tunnel] %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$message" | tee -a "$LOG_FILE" >/dev/null
 }
+
+trap 'rc=$?; if [ "$rc" -ne 0 ]; then log "action ${ACTION} failed while running: ${BASH_COMMAND} (exit ${rc})"; fi' ERR
 
 load_env() {
   if [ ! -f "$ENV_FILE" ]; then
@@ -22,11 +30,17 @@ load_env() {
   . "$ENV_FILE"
   set +a
 
+  SBS_TUNNEL_NAME="$(trim_cr "${SBS_TUNNEL_NAME:-}")"
+  SBS_GUARD_PUBLIC_IP="$(trim_cr "${SBS_GUARD_PUBLIC_IP:-}")"
+  SBS_GUARD_TUNNEL_IP="$(trim_cr "${SBS_GUARD_TUNNEL_IP:-}")"
+  SBS_CLIENT_TUNNEL_IP="$(trim_cr "${SBS_CLIENT_TUNNEL_IP:-}")"
+  SBS_TUNNEL_CIDR="$(trim_cr "${SBS_TUNNEL_CIDR:-30}")"
+  SBS_PROTECTED_CIDRS="$(trim_cr "${SBS_PROTECTED_CIDRS:-}")"
+
   : "${SBS_TUNNEL_NAME:?Missing SBS_TUNNEL_NAME}"
   : "${SBS_GUARD_PUBLIC_IP:?Missing SBS_GUARD_PUBLIC_IP}"
   : "${SBS_GUARD_TUNNEL_IP:?Missing SBS_GUARD_TUNNEL_IP}"
   : "${SBS_CLIENT_TUNNEL_IP:?Missing SBS_CLIENT_TUNNEL_IP}"
-  SBS_TUNNEL_CIDR="${SBS_TUNNEL_CIDR:-30}"
 }
 
 detect_local_ip() {
@@ -74,7 +88,7 @@ remove_tunnel() {
   fi
 }
 
-case "${1:---apply}" in
+case "$ACTION" in
   --apply|apply)
     apply_tunnel
     ;;

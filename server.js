@@ -67,6 +67,7 @@ app.use(express.static(path.join(__dirname, 'frontend', 'dist')));
 
 let db = { agents: {} }; // agents store runtime state
 let commandQueue = {}; // { agentId: [{ id, cmd }] }
+let commandLedger = {}; // { cmdId: { agentId, kind, status, output, ... } }
 
 const ipv4Pattern = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 const escapeTemplateLiteral = (value) => String(value)
@@ -96,12 +97,75 @@ StandardError=append:/var/log/sbs/agent.log
 
 [Install]
 WantedBy=multi-user.target
-`);
+`.replace(/\r\n/g, '\n'));
 
 const normalizeIp = (value) => {
   if (!value) return '';
   const candidate = Array.isArray(value) ? value[0] : String(value).split(',')[0].trim();
   return candidate.replace(/^::ffff:/, '');
+};
+
+const trimCommandOutput = (value, max = 4000) => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}\n...[truncated]`;
+};
+
+const queueAgentCommand = (agentId, cmd, meta = {}) => {
+  if (!commandQueue[agentId]) commandQueue[agentId] = [];
+  const entry = {
+    id: crypto.randomUUID(),
+    cmd,
+    kind: meta.kind || 'shell',
+    summary: meta.summary || null,
+    createdAt: new Date().toISOString(),
+  };
+  commandQueue[agentId].push(entry);
+  commandLedger[entry.id] = {
+    id: entry.id,
+    agentId,
+    kind: entry.kind,
+    summary: entry.summary,
+    status: 'queued',
+    createdAt: entry.createdAt,
+    output: '',
+    exitCode: null,
+  };
+  return entry;
+};
+
+const markCommandDispatched = (cmdId) => {
+  if (!commandLedger[cmdId]) return;
+  commandLedger[cmdId] = {
+    ...commandLedger[cmdId],
+    status: 'sent',
+    dispatchedAt: new Date().toISOString(),
+  };
+};
+
+const recordCommandResult = (cmdId, result = {}) => {
+  const previous = commandLedger[cmdId] || {};
+  commandLedger[cmdId] = {
+    ...previous,
+    ...result,
+    output: trimCommandOutput(result.output ?? previous.output ?? ''),
+    completedAt: new Date().toISOString(),
+    status: result.exitCode === 0 ? 'succeeded' : 'failed',
+  };
+  return commandLedger[cmdId];
+};
+
+const getLatestAgentCommand = (agentId, kindPrefix = null) => {
+  const matches = Object.values(commandLedger)
+    .filter((entry) => entry.agentId === agentId)
+    .filter((entry) => !kindPrefix || String(entry.kind || '').startsWith(kindPrefix))
+    .sort((a, b) => {
+      const aTs = Date.parse(a.completedAt || a.dispatchedAt || a.createdAt || 0);
+      const bTs = Date.parse(b.completedAt || b.dispatchedAt || b.createdAt || 0);
+      return bTs - aTs;
+    });
+  return matches[0] || null;
 };
 
 const upsertAgentState = (agentId, partial) => {
@@ -163,9 +227,15 @@ TUNNEL_ENV_EOF
 cat <<'TUNNEL_UNIT_EOF' > /etc/systemd/system/sbs-tunnel.service
 ${CLIENT_TUNNEL_SERVICE_UNIT}
 TUNNEL_UNIT_EOF
+sed -i 's/\r$//' /opt/sbs-agent/setup-tunnel-client.sh /opt/sbs-agent/tunnel.env /etc/systemd/system/sbs-tunnel.service
 systemctl daemon-reload
 systemctl enable sbs-tunnel.service
-systemctl restart sbs-tunnel.service
+systemctl reset-failed sbs-tunnel.service || true
+if ! systemctl restart sbs-tunnel.service; then
+  systemctl status sbs-tunnel.service --no-pager >> /var/log/sbs/agent.log 2>&1 || true
+  journalctl -u sbs-tunnel.service -n 30 --no-pager >> /var/log/sbs/agent.log 2>&1 || true
+  exit 1
+fi
 `.trim();
 };
 
@@ -177,6 +247,9 @@ if [ -f /opt/sbs-agent/setup-tunnel-client.sh ]; then
   /opt/sbs-agent/setup-tunnel-client.sh --remove || true
 fi
 rm -f /opt/sbs-agent/tunnel.env
+rm -f /etc/systemd/system/sbs-tunnel.service
+systemctl daemon-reload || true
+systemctl reset-failed sbs-tunnel.service || true
 `.trim();
 
 function detectGuardFirewallTable() {
@@ -655,7 +728,7 @@ function sendStats() {
       "ss -ant | wc -l; " +
       "ss -ant | grep ESTAB | wc -l; " +
       "ss -ant | grep SYN-RECV | wc -l; " +
-      "NFT_TABLE='inet detroit_guard'; " +
+      "NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo 'inet detroit_guard' || echo 'inet sbs_filter'); " +
       "nft list set $NFT_TABLE blacklist 2>/dev/null | grep -oE '([0-9]{1,3}\\.){3}[0-9]{1,3}' | wc -l; " +
       "free | grep Mem | awk '{print $3/$2 * 100}'; " +
       "cat /proc/uptime | awk '{print $1}'; " +
@@ -720,13 +793,17 @@ function pollCommands() {
     try {
       const cmds = JSON.parse(res);
       cmds.forEach(cmd => {
-        exec(cmd.cmd, { timeout: 30000 }, (error, stdout, stderr) => {
+        log('[command] running ' + (cmd.kind || 'shell') + ' (' + cmd.id + ')');
+        exec(cmd.cmd, { timeout: 45000, maxBuffer: 1024 * 1024, shell: '/bin/bash' }, (error, stdout, stderr) => {
+          const output = (stdout || '') + (stderr || '') + (error && error.killed ? '\\n[command] timed out' : '');
+          log('[command] ' + cmd.id + ' ' + (error ? 'failed' : 'completed') + ' with exit ' + (error ? (error.code || 1) : 0));
           makeRequest('/api/agent/command-result', 'POST', {
             agentId: config.agentId,
             apiKey: config.apiKey,
             cmdId: cmd.id,
-            output: stdout + stderr,
-            exitCode: error ? error.code : 0
+            kind: cmd.kind || null,
+            output,
+            exitCode: error ? (typeof error.code === 'number' ? error.code : 1) : 0
           });
         });
       });
@@ -811,6 +888,8 @@ EOF
 cat << 'EOF' > /etc/systemd/system/sbs-tunnel.service
 ${CLIENT_TUNNEL_SERVICE_UNIT}
 EOF
+
+sed -i 's/\r$//' /opt/sbs-agent/setup-tunnel-client.sh /etc/systemd/system/sbs-tunnel.service
 
 systemctl daemon-reload
 systemctl enable sbs-agent
@@ -901,12 +980,14 @@ app.get('/api/agent/commands', agentAuthMiddleware, (req, res) => {
   const { agentId } = req.user;
   const cmds = commandQueue[agentId] || [];
   commandQueue[agentId] = [];
+  cmds.forEach((cmd) => markCommandDispatched(cmd.id));
   res.json(cmds);
 });
 
 app.post('/api/agent/command-result', agentAuthMiddleware, (req, res) => {
-  const { cmdId, output, exitCode } = req.body;
-  broadcastToUser(req.user.id, { type: 'command_result', cmdId, output, exitCode });
+  const { cmdId, output, exitCode, kind } = req.body;
+  const result = recordCommandResult(cmdId, { output, exitCode, kind });
+  broadcastToUser(req.user.id, { type: 'command_result', cmdId, output, exitCode, kind: result.kind, status: result.status });
   res.json({ success: true });
 });
 
@@ -927,9 +1008,10 @@ app.post('/api/command', authMiddleware, (req, res) => {
     return res.status(400).json({ error: 'No agent connected. Make sure your agent is running and registered.' });
   }
 
-  if (!commandQueue[targetAgentId]) commandQueue[targetAgentId] = [];
-  const cmdObj = { id: crypto.randomUUID(), cmd };
-  commandQueue[targetAgentId].push(cmdObj);
+  const cmdObj = queueAgentCommand(targetAgentId, cmd, {
+    kind: 'shell',
+    summary: cmd.substring(0, 120)
+  });
 
   console.log(`[cmd] Queued for agent ${targetAgentId}: ${cmd.substring(0, 80)}...`);
   res.json({ success: true, cmdId: cmdObj.id });
@@ -983,11 +1065,10 @@ async function setupTunnel(req, res, agentId, clientIp) {
     }
       
     // 2. Queue command for Client side
-    if (!commandQueue[agentId]) commandQueue[agentId] = [];
-    
-    // Construct the command to setup the client tunnel
-    // We use a one-liner to create the GRE tunnel on the client
-    commandQueue[agentId].push({ id: crypto.randomUUID(), cmd: buildClientTunnelBootstrapCommand(tunnelConfig) });
+    const clientCommand = queueAgentCommand(agentId, buildClientTunnelBootstrapCommand(tunnelConfig), {
+      kind: 'tunnel:apply',
+      summary: `Bootstrap ${tunnelConfig.tunnelName} on client`
+    });
 
       // 3. Update Supabase
       await supabaseAdmin.from('user_profiles')
@@ -1010,6 +1091,7 @@ async function setupTunnel(req, res, agentId, clientIp) {
         subnet: tunnelConfig.subnet,
         status: 'provisioning',
         statePath: tunnelConfig.statePath,
+        clientCommandId: clientCommand.id,
       });
   } catch (err) {
     console.error(`[tunnel] Tunnel creation failed for agent ${agentId}:`, err);
@@ -1084,8 +1166,10 @@ app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddlew
       tunnelName: getTunnelInterfaceName(agent_id),
     };
 
-    if (!commandQueue[agent_id]) commandQueue[agent_id] = [];
-    commandQueue[agent_id].push({ id: crypto.randomUUID(), cmd: buildClientTunnelRemovalCommand() });
+    queueAgentCommand(agent_id, buildClientTunnelRemovalCommand(), {
+      kind: 'tunnel:remove',
+      summary: `Remove ${tunnelConfig.tunnelName || getTunnelInterfaceName(agent_id)} from client`
+    });
 
     const tunnelRun = runTunnelManager('remove', tunnelConfig);
     console.log(`[tunnel] Guard tunnel manager used: ${tunnelRun.scriptPath}`);
@@ -1116,6 +1200,7 @@ app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddlew
       const tunnelConfig = getTunnelConfig(agent_id);
       const clientTunnelPresent = Boolean(clientState?.tunnelPresent);
       const clientTunnelName = clientState?.tunnelName || getTunnelInterfaceName(agent_id);
+      const lastTunnelCommand = getLatestAgentCommand(agent_id, 'tunnel:');
       let status = 'inactive';
 
       if (systemState.exists && clientTunnelPresent) {
@@ -1140,6 +1225,14 @@ app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddlew
         detail = 'Tunnel creation was queued and is still waiting for both sides to come up.';
       }
 
+      if (lastTunnelCommand?.status === 'failed') {
+        detail = `Last tunnel job failed: ${trimCommandOutput(lastTunnelCommand.output || 'Unknown error', 240)}`;
+      } else if (!systemState.exists && !clientTunnelPresent && lastTunnelCommand?.status === 'sent') {
+        detail = 'Tunnel bootstrap command was dispatched to the client and is waiting to finish.';
+      } else if (!systemState.exists && !clientTunnelPresent && lastTunnelCommand?.status === 'queued') {
+        detail = 'Tunnel bootstrap command is queued for the client agent.';
+      }
+
       syncTunnelProfileStatus(agent_id, status, data?.client_ip || clientState?.ip || null).catch((err) => {
         console.error(`[tunnel] failed to persist status for ${agent_id}:`, err.message);
       });
@@ -1158,6 +1251,17 @@ app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddlew
         guardTunnelIp: tunnelConfig?.guardTunnelIp || null,
         clientTunnelIp: tunnelConfig?.clientTunnelIp || null,
         statePath: getTunnelStatePath(),
+        lastTunnelCommand: lastTunnelCommand ? {
+          id: lastTunnelCommand.id,
+          kind: lastTunnelCommand.kind,
+          summary: lastTunnelCommand.summary,
+          status: lastTunnelCommand.status,
+          exitCode: lastTunnelCommand.exitCode,
+          createdAt: lastTunnelCommand.createdAt,
+          dispatchedAt: lastTunnelCommand.dispatchedAt || null,
+          completedAt: lastTunnelCommand.completedAt || null,
+          output: lastTunnelCommand.output || '',
+        } : null,
       });
     } catch (err) {
       res.status(500).json({ error: 'Failed to fetch status' });
@@ -1173,22 +1277,22 @@ radar.start();
 function broadcastGlobalBan(ip) {
   // Broadcast to all connected agents
   Object.keys(db.agents).forEach(agentId => {
-    if (!commandQueue[agentId]) commandQueue[agentId] = [];
-    commandQueue[agentId].push({ 
-      id: crypto.randomUUID(), 
-      cmd: `NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo detroit_guard || echo sbs_filter); nft add element inet $NFT_TABLE blacklist '{ ${ip} }' 2>/dev/null || true`
-    });
+    queueAgentCommand(
+      agentId,
+      `NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo detroit_guard || echo sbs_filter); nft add element inet $NFT_TABLE blacklist '{ ${ip} }' 2>/dev/null || true`,
+      { kind: 'firewall:ban', summary: `Block ${ip} on client firewall` }
+    );
   });
   console.log(`[global-ban] Syncing ${ip} to all agents.`);
 }
 
 function broadcastGlobalUnban(ip) {
   Object.keys(db.agents).forEach(agentId => {
-    if (!commandQueue[agentId]) commandQueue[agentId] = [];
-    commandQueue[agentId].push({
-      id: crypto.randomUUID(),
-      cmd: `NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo detroit_guard || echo sbs_filter); nft delete element inet $NFT_TABLE blacklist '{ ${ip} }' 2>/dev/null || true`
-    });
+    queueAgentCommand(
+      agentId,
+      `NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo detroit_guard || echo sbs_filter); nft delete element inet $NFT_TABLE blacklist '{ ${ip} }' 2>/dev/null || true`,
+      { kind: 'firewall:unban', summary: `Unblock ${ip} on client firewall` }
+    );
   });
   console.log(`[global-ban] Removing ${ip} from connected agents.`);
 }
