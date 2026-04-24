@@ -75,7 +75,9 @@ const escapeTemplateLiteral = (value) => String(value)
   .replace(/\$\{/g, '\\${');
 
 const CLIENT_TUNNEL_SCRIPT_SOURCE = escapeTemplateLiteral(
-  fs.readFileSync(path.join(__dirname, 'agent', 'setup-tunnel-client.sh'), 'utf8')
+  fs
+    .readFileSync(path.join(__dirname, 'agent', 'setup-tunnel-client.sh'), 'utf8')
+    .replace(/\r\n/g, '\n')
 );
 
 const CLIENT_TUNNEL_SERVICE_UNIT = escapeTemplateLiteral(`[Unit]
