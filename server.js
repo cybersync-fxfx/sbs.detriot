@@ -209,13 +209,27 @@ const resolveGuardPublicIp = (req) => {
 
 const generateWgKeys = () => {
   try {
-    const priv = execSync('wg genkey', { encoding: 'utf8' }).trim();
-    const pub = execSync(`echo "${priv}" | wg pubkey`, { encoding: 'utf8' }).trim();
-    return { priv, pub };
+    const { privateKey, publicKey } = crypto.generateKeyPairSync('x25519', {
+      publicKeyEncoding: { type: 'spki', format: 'der' },
+      privateKeyEncoding: { type: 'pkcs8', format: 'der' },
+    });
+
+    // WireGuard expects raw 32-byte keys encoded in Base64.
+    // The DER encoding includes headers; we need to extract the raw 32 bytes.
+    // Private key DER (PKCS#8) for X25519 is 48 bytes; raw key starts at offset 16.
+    // Public key DER (SPKI) for X25519 is 44 bytes; raw key starts at offset 12.
+    const privRaw = privateKey.slice(16);
+    const pubRaw = publicKey.slice(12);
+
+    return {
+      priv: privRaw.toString('base64'),
+      pub: pubRaw.toString('base64'),
+    };
   } catch (err) {
-    // Fallback if wg is not installed on the panel host yet
-    console.warn('[tunnel] wg command not found for key generation, using fallback (may require wg installation)');
-    return { priv: 'FALLBACK_PLEASE_INSTALL_WG', pub: 'FALLBACK_PLEASE_INSTALL_WG' };
+    console.error('[tunnel] Crypto key generation failed:', err.message);
+    // Absolute fallback (not recommended but avoids crash)
+    const dummy = crypto.randomBytes(32).toString('base64');
+    return { priv: dummy, pub: dummy };
   }
 };
 
@@ -983,6 +997,11 @@ app.post('/api/agent/stats', agentAuthMiddleware, (req, res) => {
     console.error(`[tunnel] failed to sync profile status for ${agentId}:`, err.message);
   });
 
+  // Wake up Radar if it's enabled to ensure real-time protection for new connections
+  if (radar && radar.config.enabled) {
+    radar.scan({ manual: false }).catch(() => {});
+  }
+
   // Cache the latest stats per user so the frontend can fetch them on page load
   if (!db.lastStats) db.lastStats = {};
   db.lastStats[req.user.id] = {
@@ -1088,9 +1107,11 @@ async function setupTunnel(req, res, agentId, clientIp) {
   try {
     const guardPubIp = resolveGuardPublicIp(req);
     
-    // Allocate config and generate keys if missing
+    // Allocate config and generate keys if missing or invalid
     let tunnelConfig = getTunnelConfig(agentId);
-    if (!tunnelConfig || !tunnelConfig.guardPrivateKey) {
+    const hasInvalidKeys = tunnelConfig && (String(tunnelConfig.guardPrivateKey).includes('FALLBACK') || !tunnelConfig.guardPrivateKey);
+
+    if (!tunnelConfig || hasInvalidKeys) {
       const guardKeys = generateWgKeys();
       const clientKeys = generateWgKeys();
       tunnelConfig = getOrAllocateTunnelConfig(agentId, {

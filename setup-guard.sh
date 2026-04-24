@@ -102,7 +102,24 @@ table inet detroit_guard {
 
   chain forward {
     type filter hook forward priority 0; policy accept;
+    
+    # Drop already-banned IPs immediately
     ip saddr @blacklist drop
+
+    # Track SYN floods aimed at Agents (Forwarded traffic)
+    tcp flags syn \
+      add @syn_meter { ip saddr limit rate over 100/second } \
+      add @blacklist { ip saddr timeout 24h } \
+      log prefix "[SBS-BAN-SYN-FWD] " \
+      drop
+
+    # Track UDP floods aimed at Agents (Forwarded traffic)
+    meta l4proto udp \
+      add @udp_meter { ip saddr limit rate over 5000/second } \
+      add @blacklist { ip saddr timeout 24h } \
+      log prefix "[SBS-BAN-UDP-FWD] " \
+      drop
+
     ct state established,related accept
   }
 }
@@ -123,9 +140,10 @@ touch /var/log/sbs/attacks.log
 journalctl -kf --no-hostname 2>/dev/null | grep --line-buffered '\[SBS-BAN-' | while IFS= read -r line; do
   SRC=$(echo "$line" | grep -oP 'SRC=\K[\d.]+')
   PROTO=$(echo "$line" | grep -oP '\[SBS-BAN-\K[A-Z]+(?=\])')
+  SCOPE=$(echo "$line" | grep -q 'FWD' && echo "FORWARDED" || echo "LOCAL")
   TS=$(date '+%Y-%m-%d %H:%M:%S')
   if [ -n "$SRC" ]; then
-    echo "[$TS] AUTO-BAN ${PROTO:-UNKNOWN} flood from ${SRC} — blacklisted for 24h" >> /var/log/sbs/attacks.log
+    echo "[$TS] AUTO-BAN ${PROTO:-UNKNOWN} flood from ${SRC} (${SCOPE}) — blacklisted for 24h" >> /var/log/sbs/attacks.log
   fi
 done
 LOGGEREOF
