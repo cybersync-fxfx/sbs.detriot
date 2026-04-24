@@ -68,6 +68,7 @@ app.use(express.static(path.join(__dirname, 'frontend', 'dist')));
 let db = { agents: {} }; // agents store runtime state
 let commandQueue = {}; // { agentId: [{ id, cmd }] }
 let commandLedger = {}; // { cmdId: { agentId, kind, status, output, ... } }
+let radar = null;
 
 const ipv4Pattern = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 const escapeTemplateLiteral = (value) => String(value)
@@ -284,6 +285,18 @@ function execNft(args) {
   }
 }
 
+function appendAttackLog(message) {
+  try {
+    fs.mkdirSync('/var/log/sbs', { recursive: true });
+    fs.appendFileSync(
+      '/var/log/sbs/attacks.log',
+      `[${new Date().toISOString()}] ${message}\n`
+    );
+  } catch (_) {
+    // Non-fatal: guard logging should never break request handling.
+  }
+}
+
 function ensureGuardBlacklistSet() {
   const target = detectGuardFirewallTable();
 
@@ -328,14 +341,22 @@ function listGuardBlockedIps() {
 function addGuardBlockedIp(ip) {
   const safeIp = assertValidIpv4(ip);
   const target = ensureGuardBlacklistSet();
-  execNft(['add', 'element', target.family, target.table, 'blacklist', `{ ${safeIp} }`]);
+  try {
+    execNft(['add', 'element', target.family, target.table, 'blacklist', `{ ${safeIp} }`]);
+  } catch (err) {
+    if (!/File exists/i.test(err.message)) throw err;
+  }
   return listGuardBlockedIps();
 }
 
 function removeGuardBlockedIp(ip) {
   const safeIp = assertValidIpv4(ip);
   const target = ensureGuardBlacklistSet();
-  execNft(['delete', 'element', target.family, target.table, 'blacklist', `{ ${safeIp} }`]);
+  try {
+    execNft(['delete', 'element', target.family, target.table, 'blacklist', `{ ${safeIp} }`]);
+  } catch (err) {
+    if (!/No such file or directory|Could not process rule/i.test(err.message)) throw err;
+  }
   return listGuardBlockedIps();
 }
 
@@ -533,6 +554,7 @@ app.post('/api/guard/blocklist', authMiddleware, (req, res) => {
   try {
     const ip = assertValidIpv4(req.body?.ip);
     const result = addGuardBlockedIp(ip);
+    appendAttackLog(`[manual-ban] ${ip} blocked from dashboard by ${req.user.username || req.user.email || req.user.id}`);
     broadcastGlobalBan(ip);
     res.json({
       success: true,
@@ -548,6 +570,7 @@ app.delete('/api/guard/blocklist/:ip', authMiddleware, (req, res) => {
   try {
     const ip = assertValidIpv4(req.params.ip);
     const result = removeGuardBlockedIp(ip);
+    appendAttackLog(`[manual-unban] ${ip} removed from dashboard by ${req.user.username || req.user.email || req.user.id}`);
     broadcastGlobalUnban(ip);
     res.json({
       success: true,
@@ -1268,11 +1291,6 @@ app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddlew
     }
   });
 
-// ── Radar Scanner Integration ────────────────────────────────
-const RadarScanner = require('./radar-scanner');
-const radar = new RadarScanner(supabaseAdmin, broadcastToUser);
-radar.start();
-
 // ── Global Blocklist Sync ────────────────────────────────────
 function broadcastGlobalBan(ip) {
   // Broadcast to all connected agents
@@ -1296,6 +1314,30 @@ function broadcastGlobalUnban(ip) {
   });
   console.log(`[global-ban] Removing ${ip} from connected agents.`);
 }
+
+async function applyRadarAutoBan(ip, reason, metrics = {}) {
+  addGuardBlockedIp(ip);
+  appendAttackLog(
+    `[auto-ban] ${ip} blocked by Threat Radar: ${reason} | tcp=${metrics.tcp || 0} syn=${metrics.syn || 0} udp=${metrics.udp || 0} delta=${metrics.delta || 0}`
+  );
+  broadcastGlobalBan(ip);
+  broadcastToAll({
+    type: 'radar_ban',
+    ip,
+    reason,
+    metrics,
+    detectedAt: new Date().toISOString(),
+  });
+}
+
+// ── Radar Scanner Integration ────────────────────────────────
+const RadarScanner = require('./radar-scanner');
+radar = new RadarScanner(supabaseAdmin, {
+  broadcastToUser,
+  onBan: applyRadarAutoBan,
+  listBlockedIps: () => listGuardBlockedIps().ips,
+});
+radar.start();
 
 // ── Websocket logic ──────────────────────────────────────────
 const clients = {}; // { userId: [ws1, ws2] }
@@ -1381,6 +1423,39 @@ app.get('/api/health', (req, res) => {
 });
 
 // Threat Radar API
+app.get('/api/radar/config', authMiddleware, (req, res) => {
+  if (!radar) {
+    return res.status(503).json({ error: 'Threat Radar is not initialized.' });
+  }
+  res.json(radar.getStatus());
+});
+
+app.post('/api/radar/config', authMiddleware, adminMiddleware, (req, res) => {
+  if (!radar) {
+    return res.status(503).json({ error: 'Threat Radar is not initialized.' });
+  }
+
+  try {
+    const next = radar.updateConfig(req.body || {});
+    res.json(next);
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Failed to update Threat Radar config.' });
+  }
+});
+
+app.post('/api/radar/scan', authMiddleware, adminMiddleware, async (req, res) => {
+  if (!radar) {
+    return res.status(503).json({ error: 'Threat Radar is not initialized.' });
+  }
+
+  try {
+    const next = await radar.scanNow();
+    res.json(next);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Threat Radar scan failed.' });
+  }
+});
+
 app.get('/api/radar/stats', authMiddleware, async (req, res) => {
   try {
     const since = new Date(Date.now() - 86400000).toISOString();
@@ -1410,7 +1485,8 @@ app.get('/api/radar/stats', authMiddleware, async (req, res) => {
       stats: {
         scannedToday: scannedToday || 0,
         blockedToday: blockedToday || 0
-      }
+      },
+      radar: radar ? radar.getStatus() : null,
     });
   } catch (err) {
     const missingRadarTable = err?.code === '42P01' || /threat_radar/i.test(err?.message || '');

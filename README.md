@@ -28,6 +28,7 @@ SBS is a full-stack web application designed for DDoS protection management. Use
    ```
    `SUPABASE_SERVICE_KEY` is required for admin approval, admin user listing, and tunnel/profile updates. The server also accepts `SUPABASE_SERVICE_ROLE_KEY` as an alias.
    `GUARD_PUBLIC_IP` should be the real public GRE endpoint for the guard server. `SBS_TUNNEL_POOL` controls the per-agent `/30` pool used for GRE tunnel addressing.
+   `SBS_RADAR_*` controls the active guard-side scan engine and auto-ban thresholds. If your panel stays behind Cloudflare or another reverse proxy, add those proxy CIDRs to `SBS_RADAR_TRUSTED_PROXY_CIDRS` so the scanner never auto-bans them.
 
 3. **Database Setup:**
    Execute the contents of `supabase_setup.sql` in your Supabase project's SQL Editor to create the required tables, triggers, and security policies.
@@ -75,6 +76,13 @@ SUPABASE_ANON_KEY="your-supabase-anon-key"
 SUPABASE_SERVICE_KEY="your-supabase-service-role-key"
 GUARD_PUBLIC_IP="43.228.212.54"
 SBS_TUNNEL_POOL="10.200.0.0/16"
+SBS_RADAR_ENABLED="1"
+SBS_RADAR_AUTO_BAN="1"
+SBS_RADAR_BAN_THRESHOLD="90"
+SBS_RADAR_WATCH_THRESHOLD="55"
+SBS_RADAR_SCAN_INTERVAL_MS="10000"
+SBS_RADAR_WHITELIST_CIDRS="127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,35.235.240.0/20"
+SBS_RADAR_TRUSTED_PROXY_CIDRS=""
 ```
 
 ### 4. Nginx Reverse Proxy Config (with WebSocket Support)
@@ -124,6 +132,23 @@ This installs:
 - `/opt/detroit-sbs/tunnel-manager.sh`
 - `/opt/detroit-sbs/restore-tunnels.sh`
 - `sbs-tunnel-restore.service` to recreate saved GRE tunnels after reboot
+
+### 6.1 Threat Radar / Strict Auto-Ban
+Threat Radar now performs active guard-side scans and can automatically ban suspicious IPs before connection floods overwhelm protected services. The safest production defaults are already built in, but you should still tune the whitelist and trusted proxy ranges:
+
+- `SBS_RADAR_WHITELIST_CIDRS`
+  Use for management and private ranges that should never be banned.
+- `SBS_RADAR_TRUSTED_PROXY_CIDRS`
+  Add Cloudflare or any reverse-proxy CIDRs here if your panel stays proxied.
+- `SBS_RADAR_BAN_THRESHOLD`
+  Default `90` for strict but conservative autobans.
+
+The dashboard `Threat Radar` page now exposes:
+- real scan status
+- live watch/ban counts
+- auto-ban on/off
+- threshold tuning
+- manual `Scan Now`
 
 ### 7. Cloudflare / Reverse Proxy
 If you place the panel behind Cloudflare, do not leave `Under Attack Mode` or managed browser challenges enabled for machine-to-machine agent routes. The agent must be able to reach:
