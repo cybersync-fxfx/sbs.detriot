@@ -1222,7 +1222,7 @@ function runTunnelManager(action, tunnelConfig) {
 
   const isRoot = typeof process.getuid === 'function' ? process.getuid() === 0 : false;
   const command = isRoot ? 'bash' : 'sudo';
-  const args = isRoot ? bashArgs : ['bash', ...bashArgs];
+  const args = isRoot ? bashArgs : ['-E', 'bash', ...bashArgs];
   
   // Pass keys via env for security
   const env = { 
