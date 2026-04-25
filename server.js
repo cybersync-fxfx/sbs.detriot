@@ -833,6 +833,12 @@ function sendStats() {
         const tunnelName = 'sbs_' + String(config.agentId || '').substring(0, 8);
         const tunnelPresent = fs.existsSync('/sys/class/net/' + tunnelName);
 
+        if (config.enableTunnel && !tunnelPresent && (Date.now() - (global.lastTunnelRetry || 0)) > 60000) {
+          log('[tunnel] interface missing, attempting auto-recovery...');
+          global.lastTunnelRetry = Date.now();
+          registerTunnel();
+        }
+
         makeRequest('/api/agent/stats', 'POST', {
           agentId:    config.agentId,
           apiKey:     config.apiKey,
