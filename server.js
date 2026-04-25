@@ -909,7 +909,7 @@ mkdir -p /var/log/sbs
 touch /var/log/sbs/attacks.log
 touch /var/log/sbs/agent.log
 
-cat << 'EOF' > /etc/nftables.conf
+cat << 'NFT_EOF' > /etc/nftables.conf
 #!/usr/sbin/nft -f
 flush ruleset
 
