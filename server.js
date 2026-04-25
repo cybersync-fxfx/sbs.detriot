@@ -664,7 +664,7 @@ if ! command -v node &> /dev/null; then
 fi
 
 mkdir -p /opt/sbs-agent
-cat << 'EOF' > /opt/sbs-agent/agent.js
+cat << 'AGENT_JS_EOF' > /opt/sbs-agent/agent.js
 const fs = require('fs');
 const { exec } = require('child_process');
 const http = require('http');
@@ -891,18 +891,18 @@ register();
 setInterval(register, 15000);
 setInterval(sendStats, 1000);
 setInterval(pollCommands, 1000);
-EOF
+AGENT_JS_EOF
 
-cat << EOF > /opt/sbs-agent/.env
+cat << ENV_EOF > /opt/sbs-agent/.env
 SBS_SERVER=${serverUrl}
 SBS_AGENT_ID=${req.user.agent_id}
 SBS_API_KEY=${req.user.api_key}
 SBS_ENABLE_TUNNEL=1
-EOF
+ENV_EOF
 
-cat << 'EOF' > /opt/sbs-agent/setup-tunnel-client.sh
+cat << 'TUNNEL_SH_EOF' > /opt/sbs-agent/setup-tunnel-client.sh
 ${CLIENT_TUNNEL_SCRIPT_SOURCE}
-EOF
+TUNNEL_SH_EOF
 chmod +x /opt/sbs-agent/setup-tunnel-client.sh
 
 mkdir -p /var/log/sbs
@@ -936,14 +936,11 @@ table inet detroit_guard {
     ip protocol icmp drop
   }
 }
-EOF
+NFT_EOF
 systemctl enable nftables
 systemctl restart nftables
 
-echo "[SBS] Tunnel bootstrap disabled in this installer build."
-echo "[SBS] Agent connectivity, stats, terminal, and dashboard features remain enabled."
-
-cat << 'EOF' > /etc/systemd/system/sbs-agent.service
+cat << 'AGENT_SVC_EOF' > /etc/systemd/system/sbs-agent.service
 [Unit]
 Description=SBS Agent
 After=network.target
@@ -959,22 +956,23 @@ RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-EOF
+AGENT_SVC_EOF
 
-cat << 'EOF' > /etc/systemd/system/sbs-tunnel.service
+cat << 'TUNNEL_SVC_EOF' > /etc/systemd/system/sbs-tunnel.service
 ${CLIENT_TUNNEL_SERVICE_UNIT}
-EOF
+TUNNEL_SVC_EOF
 
-sed -i 's/\r$//' /opt/sbs-agent/setup-tunnel-client.sh /etc/systemd/system/sbs-tunnel.service
+sed -i 's/\r$//' /opt/sbs-agent/agent.js /opt/sbs-agent/.env /opt/sbs-agent/setup-tunnel-client.sh /etc/nftables.conf /etc/systemd/system/sbs-agent.service /etc/systemd/system/sbs-tunnel.service
 
 systemctl daemon-reload
 systemctl enable sbs-agent
-systemctl disable sbs-tunnel 2>/dev/null || true
 systemctl restart sbs-agent
+systemctl disable sbs-tunnel 2>/dev/null || true
 
-echo "SBS Agent installed successfully!"
-echo "Agent ID: ${req.user.agent_id}"
-echo "Check your dashboard for connection status."
+echo "=============================================="
+echo "  SBS Agent installation complete! ✓"
+echo "  Agent ID: ${req.user.agent_id}"
+echo "=============================================="
 `;
   res.setHeader('Content-Type', 'text/x-shellscript');
   res.setHeader('Content-Disposition', `attachment; filename="sbs-agent-${req.user.agent_id}.sh"`);
