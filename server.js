@@ -639,13 +639,28 @@ fi
 osType="${osType}"
 ${osCheckScript}
 
-echo "Installing dependencies..."
-apt-get update
-apt-get install -y curl nftables iproute2 net-tools jq wireguard wireguard-tools
+echo "Installing dependencies and preparing system..."
+apt-get update -qq
+apt-get install -y curl nftables iproute2 net-tools jq wireguard wireguard-tools procps < /dev/null
+
+# Kernel tweaks for networking and tunneling
+cat << 'SYSCTL_EOF' > /etc/sysctl.d/99-sbs.conf
+net.ipv4.ip_forward = 1
+net.ipv6.conf.all.forwarding = 1
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+net.netfilter.nf_conntrack_max = 2000000
+net.netfilter.nf_conntrack_tcp_timeout_established = 7440
+SYSCTL_EOF
+sysctl -p /etc/sysctl.d/99-sbs.conf || true
+
+modprobe wireguard || true
+modprobe nf_conntrack || true
 
 if ! command -v node &> /dev/null; then
+  echo "Installing Node.js 20.x..."
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-  apt-get install -y nodejs
+  apt-get install -y nodejs < /dev/null
 fi
 
 mkdir -p /opt/sbs-agent
@@ -745,7 +760,10 @@ function register() {
       return;
     }
     log('[register] connected to panel');
-    if (config.enableTunnel) registerTunnel();
+    if (config.enableTunnel) {
+      log('[tunnel] waiting for registration to settle...');
+      setTimeout(registerTunnel, 2000);
+    }
   });
 }
 
@@ -811,8 +829,8 @@ function sendStats() {
           ...sshLines.filter(l => l.trim()).map(l => '[SSH] ' + l.trim()),
           ...attackLines.filter(l => l.trim()).map(l => '[FW]  ' + l.trim()),
         ].join('\\n');
-
-        const tunnelName = 'gre_' + String(config.agentId || '').substring(0, 8);
+        
+        const tunnelName = 'sbs_' + String(config.agentId || '').substring(0, 8);
         const tunnelPresent = fs.existsSync('/sys/class/net/' + tunnelName);
 
         makeRequest('/api/agent/stats', 'POST', {
@@ -873,7 +891,7 @@ cat << EOF > /opt/sbs-agent/.env
 SBS_SERVER=${serverUrl}
 SBS_AGENT_ID=${req.user.agent_id}
 SBS_API_KEY=${req.user.api_key}
-SBS_ENABLE_TUNNEL=0
+SBS_ENABLE_TUNNEL=1
 EOF
 
 cat << 'EOF' > /opt/sbs-agent/setup-tunnel-client.sh

@@ -7,11 +7,21 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 echo "[1/5] Enabling IP Forwarding and WireGuard dependencies..."
-apt-get update -qq && apt-get install -y wireguard wireguard-tools
-echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-detroit-sbs.conf
-echo 'net.ipv4.conf.all.rp_filter=0' >> /etc/sysctl.d/99-detroit-sbs.conf
-echo 'net.ipv4.conf.default.rp_filter=0' >> /etc/sysctl.d/99-detroit-sbs.conf
-sysctl -p /etc/sysctl.d/99-detroit-sbs.conf
+apt-get update -qq && apt-get install -y wireguard wireguard-tools procps < /dev/null
+
+# Kernel tweaks for high-performance networking
+cat << 'SYSCTL_EOF' > /etc/sysctl.d/99-detroit-sbs.conf
+net.ipv4.ip_forward = 1
+net.ipv6.conf.all.forwarding = 1
+net.ipv4.conf.all.rp_filter = 0
+net.ipv4.conf.default.rp_filter = 0
+net.netfilter.nf_conntrack_max = 2000000
+net.netfilter.nf_conntrack_tcp_timeout_established = 7440
+SYSCTL_EOF
+sysctl -p /etc/sysctl.d/99-detroit-sbs.conf || true
+
+modprobe wireguard || true
+modprobe nf_conntrack || true
 
 echo "[2/5] Setting up Tunnel Manager..."
 mkdir -p /opt/detroit-sbs

@@ -1,5 +1,5 @@
 #!/bin/bash
-# VERSION: 1.0.3
+# VERSION: 1.0.4
 # Detroit SBS — Agent Bootstrap / Self-Contained Installer
 # This file is the authoritative versioned agent.
 # Clients update by running:  sudo bash sbs-update.sh
@@ -72,7 +72,7 @@ function request(path, method, data, cb, hops=0) {
   const mod = url.protocol==='https:' ? https : http;
   const req = mod.request(url, {
     method,
-    headers:{ 'Content-Type':'application/json','User-Agent':'sbs-agent/1.0.1' }
+    headers:{ 'Content-Type':'application/json','User-Agent':'sbs-agent/1.0.4' }
   }, res => {
     let body='';
     res.on('data', d => body+=d);
@@ -90,6 +90,19 @@ function request(path, method, data, cb, hops=0) {
   req.end();
 }
 
+function registerTunnel() {
+  request('/api/agent/tunnel/create', 'POST', {
+    agentId: config.agentId,
+    apiKey: config.apiKey
+  }, (err) => {
+    if (err) {
+      log('[tunnel] ' + err.message);
+      return;
+    }
+    log('[tunnel] registered with guard');
+  });
+}
+
 // ── Register ──────────────────────────────────────────────────
 function register() {
   request('/api/agent/register','POST',{
@@ -99,7 +112,17 @@ function register() {
     ip:       'auto',
     os:       'Ubuntu',
     arch:     process.arch
-  }, err => { if(err) log('[register] '+err.message); else log('[register] connected'); });
+  }, err => { 
+    if(err) {
+      log('[register] '+err.message); 
+    } else {
+      log('[register] connected');
+      if (config.enableTunnel) {
+        log('[tunnel] waiting for registration to settle...');
+        setTimeout(registerTunnel, 2000);
+      }
+    }
+  });
 }
 
 // ── Network bytes ─────────────────────────────────────────────
@@ -126,10 +149,11 @@ function sendStats() {
       "ss -ant | wc -l; " +
       "ss -ant | grep ESTAB | wc -l; " +
       "ss -ant | grep SYN-RECV | wc -l; " +
-      "NFT_TABLE=$(nft list table inet sbs_filter 2>/dev/null && echo 'inet sbs_filter' || echo 'inet detroit_guard'); " +
+      "NFT_TABLE=$(nft list table inet detroit_guard >/dev/null 2>&1 && echo 'inet detroit_guard' || echo 'inet sbs_filter'); " +
       "nft list set $NFT_TABLE blacklist 2>/dev/null | grep -oE '([0-9]{1,3}\\.){3}[0-9]{1,3}' | wc -l; " +
       "free | grep Mem | awk '{print $3/$2 * 100}'; " +
       "cat /proc/uptime | awk '{print $1}'; " +
+      "ss -anu | wc -l; " +
       "grep -E 'Accepted|Failed|Invalid|Disconnected' /var/log/auth.log 2>/dev/null | tail -n 20 || " +
       "grep -E 'Accepted|Failed|Invalid|Disconnected' /var/log/secure 2>/dev/null | tail -n 20 || echo ''; " +
       "echo '---ATTACKS---'; " +
@@ -152,6 +176,9 @@ function sendStats() {
           ...atkLines.filter(l=>l.trim()).map(l=>'[FW]  '+l.trim()),
         ].join('\n');
 
+        const tunnelName = 'sbs_' + String(config.agentId || '').substring(0, 8);
+        const tunnelPresent = fs.existsSync('/sys/class/net/' + tunnelName);
+
         request('/api/agent/stats','POST',{
           agentId:     config.agentId,
           apiKey:      config.apiKey,
@@ -166,6 +193,8 @@ function sendStats() {
           udpConns:    parseInt(lines[6])||0,
           log:         logOutput,
           iface:       netNow.iface,
+          tunnelName,
+          tunnelPresent,
         });
       }
     );
@@ -179,13 +208,17 @@ function pollCommands() {
     try {
       const cmds=JSON.parse(res);
       cmds.forEach(cmd=>{
-        exec(cmd.cmd,{timeout:30000},(error,stdout,stderr)=>{
+        log('[command] running ' + (cmd.kind || 'shell') + ' (' + cmd.id + ')');
+        exec(cmd.cmd,{timeout:45000, maxBuffer: 1024*1024, shell: '/bin/bash'},(error,stdout,stderr)=>{
+          const output = (stdout || '') + (stderr || '') + (error && error.killed ? '\n[command] timed out' : '');
+          log('[command] ' + cmd.id + ' ' + (error ? 'failed' : 'completed') + ' with exit ' + (error ? (error.code || 1) : 0));
           request('/api/agent/command-result','POST',{
             agentId:  config.agentId,
             apiKey:   config.apiKey,
             cmdId:    cmd.id,
-            output:   stdout+stderr,
-            exitCode: error?error.code:0
+            kind:     cmd.kind || null,
+            output,
+            exitCode: error ? (typeof error.code === 'number' ? error.code : 1) : 0
           });
         });
       });
@@ -217,15 +250,32 @@ if [ "$1" = "--install" ]; then
 SBS_SERVER=$SBS_SERVER
 SBS_AGENT_ID=$SBS_AGENT_ID
 SBS_API_KEY=$SBS_API_KEY
-SBS_ENABLE_TUNNEL=0
+SBS_ENABLE_TUNNEL=1
 EOF
   chmod 600 "$ENV_FILE"
   echo -e "${GREEN}[✓] .env written to $ENV_FILE${RESET}"
 
+  # Install dependencies
+  echo -e "${CYAN}[SBS] Installing dependencies and preparing system...${RESET}"
+  apt-get update -qq
+  apt-get install -y curl nftables iproute2 net-tools jq wireguard wireguard-tools procps < /dev/null
+
+  # Kernel tweaks
+  cat << 'SYSCTL_EOF' > /etc/sysctl.d/99-sbs.conf
+net.ipv4.ip_forward = 1
+net.ipv6.conf.all.forwarding = 1
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+net.netfilter.nf_conntrack_max = 2000000
+net.netfilter.nf_conntrack_tcp_timeout_established = 7440
+SYSCTL_EOF
+  sysctl -p /etc/sysctl.d/99-sbs.conf || true
+  modprobe wireguard || true
+  modprobe nf_conntrack || true
+
   # Install node if missing
   if ! command -v node &>/dev/null; then
     echo -e "${CYAN}[SBS] Installing Node.js 20.x...${RESET}"
-    apt-get update -qq
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - &>/dev/null
     apt-get install -y nodejs &>/dev/null
     echo -e "${GREEN}[✓] Node.js installed.${RESET}"
