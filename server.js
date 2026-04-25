@@ -59,8 +59,16 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
 
 // Global Supabase Client (Anon privileges)
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-// Admin Client (Bypasses RLS, careful!)
-const supabaseAdmin = ADMIN_FEATURES_ENABLED ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY) : supabase;
+// Admin Client (Bypasses RLS, keep server-side only.)
+const supabaseAdmin = ADMIN_FEATURES_ENABLED
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    })
+  : supabase;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'frontend', 'dist')));
@@ -445,6 +453,24 @@ const privilegedSupabaseMiddleware = (req, res, next) => {
   next();
 };
 
+async function verifyAgentCredentials(agentId, apiKey) {
+  if (!ADMIN_FEATURES_ENABLED) {
+    const err = new Error('Agent authentication requires SUPABASE_SERVICE_KEY or SUPABASE_SERVICE_ROLE_KEY in the server environment.');
+    err.statusCode = 503;
+    throw err;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('user_profiles')
+    .select('id')
+    .eq('agent_id', agentId)
+    .eq('api_key', apiKey)
+    .limit(1);
+
+  if (error) throw error;
+  return data?.[0]?.id || null;
+}
+
 const agentAuthMiddleware = async (req, res, next) => {
   try {
     const body = (req && req.body && typeof req.body === 'object') ? req.body : {};
@@ -455,17 +481,19 @@ const agentAuthMiddleware = async (req, res, next) => {
     if (!agentId || !apiKey) {
       return res.status(401).json({ error: 'Missing agent credentials' });
     }
-    
-    // Call the Supabase RPC function (Security Definer) to securely verify the API key
-    const { data: userId, error } = await supabase.rpc('verify_agent', { p_agent_id: agentId, p_api_key: apiKey });
-    
-    if (error || !userId) {
+
+    const userId = await verifyAgentCredentials(agentId, apiKey);
+
+    if (!userId) {
       return res.status(401).json({ error: 'Invalid agent credentials' });
     }
-    
+
     req.user = { id: userId, agentId };
     next();
   } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
     console.error('[agent-auth] middleware failed:', err);
     return res.status(400).json({ error: 'Malformed agent request' });
   }
@@ -537,12 +565,13 @@ app.get('/api/me', authMiddleware, (req, res) => {
   });
 });
 
-app.post('/api/me/regenerate-key', authMiddleware, async (req, res) => {
+app.post('/api/me/regenerate-key', authMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
   const newKey = 'sbs_' + crypto.randomBytes(16).toString('hex');
-  const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: { headers: { Authorization: `Bearer ${req.headers.authorization.split(' ')[1]}` } }
-  });
-  const { error } = await userClient.from('user_profiles').update({ api_key: newKey }).eq('id', req.user.id);
+  const { error } = await supabaseAdmin
+    .from('user_profiles')
+    .update({ api_key: newKey })
+    .eq('id', req.user.id);
+
   if (error) return res.status(500).json({ error: error.message });
   res.json({ apiKey: newKey });
 });
@@ -623,7 +652,7 @@ if [[ "$osType" == "ubuntu" ]]; then
     exit 1
   fi
 elif [[ "$osType" == "debian" ]]; then
-  if [[ "$OS_VERSION" != "11" && "$OS_VERSION" != "12" ]]; then
+  if [[ "$OS_VERSION" != "11" && "$OS_VERSION" != "12" && "$OS_VERSION" != "13" ]]; then
     echo "Unsupported Debian version."
     exit 1
   fi
@@ -641,9 +670,12 @@ ${osCheckScript}
 
 echo "Installing dependencies and preparing system..."
 apt-get update -qq
-apt-get install -y curl nftables iproute2 net-tools jq wireguard wireguard-tools procps < /dev/null
+apt-get install -y ca-certificates curl gnupg kmod nftables iproute2 net-tools jq wireguard wireguard-tools procps < /dev/null
 
 # Kernel tweaks for networking and tunneling
+modprobe wireguard || true
+modprobe nf_conntrack || true
+
 cat << 'SYSCTL_EOF' > /etc/sysctl.d/99-sbs.conf
 net.ipv4.ip_forward = 1
 net.ipv6.conf.all.forwarding = 1
@@ -653,9 +685,6 @@ net.netfilter.nf_conntrack_max = 2000000
 net.netfilter.nf_conntrack_tcp_timeout_established = 7440
 SYSCTL_EOF
 sysctl -p /etc/sysctl.d/99-sbs.conf || true
-
-modprobe wireguard || true
-modprobe nf_conntrack || true
 
 if ! command -v node &> /dev/null; then
   echo "Installing Node.js 20.x..."
@@ -692,6 +721,11 @@ const config = {
   apiKey: process.env.SBS_API_KEY,
   enableTunnel: process.env.SBS_ENABLE_TUNNEL === '1'
 };
+
+const TUNNEL_RETRY_MS = 60000;
+let tunnelRegisterInFlight = false;
+let tunnelRegistered = false;
+let lastTunnelRegisterAt = 0;
 
 function log(message) {
   const line = '[' + new Date().toISOString() + '] ' + message;
@@ -733,15 +767,26 @@ function makeRequest(path, method, data, callback, redirectCount = 0) {
   req.end();
 }
 
-function registerTunnel() {
+function registerTunnel(reason = 'register') {
+  if (!config.enableTunnel || tunnelRegisterInFlight || tunnelRegistered) return;
+
+  const now = Date.now();
+  if (now - lastTunnelRegisterAt < TUNNEL_RETRY_MS) return;
+
+  tunnelRegisterInFlight = true;
+  lastTunnelRegisterAt = now;
+  log('[tunnel] registering with guard (' + reason + ')');
+
   makeRequest('/api/agent/tunnel/create', 'POST', {
     agentId: config.agentId,
     apiKey: config.apiKey
   }, (err) => {
+    tunnelRegisterInFlight = false;
     if (err) {
       log('[tunnel] ' + err.message);
       return;
     }
+    tunnelRegistered = true;
     log('[tunnel] registered with guard');
   });
 }
@@ -752,7 +797,7 @@ function register() {
     apiKey: config.apiKey,
     hostname: fs.readFileSync('/proc/sys/kernel/hostname', 'utf-8').trim(),
     ip: 'auto',
-    os: 'Ubuntu',
+    os: '${osType === 'debian' ? 'Debian' : 'Ubuntu'}',
     arch: process.arch
   }, (err) => {
     if (err) {
@@ -762,7 +807,7 @@ function register() {
     log('[register] connected to panel');
     if (config.enableTunnel) {
       log('[tunnel] waiting for registration to settle...');
-      setTimeout(registerTunnel, 2000);
+      setTimeout(() => registerTunnel('initial register'), 2000);
     }
   });
 }
@@ -832,11 +877,13 @@ function sendStats() {
         
         const tunnelName = 'sbs_' + String(config.agentId || '').substring(0, 8);
         const tunnelPresent = fs.existsSync('/sys/class/net/' + tunnelName);
+        if (tunnelPresent) tunnelRegistered = true;
 
-        if (config.enableTunnel && !tunnelPresent && (Date.now() - (global.lastTunnelRetry || 0)) > 60000) {
+        if (config.enableTunnel && !tunnelPresent && (Date.now() - (global.lastTunnelRetry || 0)) > TUNNEL_RETRY_MS) {
           log('[tunnel] interface missing, attempting auto-recovery...');
           global.lastTunnelRetry = Date.now();
-          registerTunnel();
+          tunnelRegistered = false;
+          registerTunnel('missing interface');
         }
 
         makeRequest('/api/agent/stats', 'POST', {
@@ -1097,21 +1144,24 @@ app.post('/api/command', authMiddleware, (req, res) => {
 });
 
 
-// GRE Tunnel Endpoints (User triggered)
+// WireGuard Tunnel Endpoints (User triggered)
 app.post('/api/me/tunnel/create', authMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
   const agentId = req.user.agent_id;
   const clientIp = db.agents[agentId]?.ip || normalizeIp(req.headers['x-forwarded-for'] || req.socket.remoteAddress);
-  return setupTunnel(req, res, agentId, clientIp);
+  return setupTunnel(req, res, agentId, clientIp, {
+    source: 'user',
+    force: req.body?.force === true || req.query?.force === '1',
+  });
 });
 
-// GRE Tunnel Endpoints (Agent triggered)
+// WireGuard Tunnel Endpoints (Agent triggered)
 app.post('/api/agent/tunnel/create', agentAuthMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
   const agentId = req.user.agentId;
   const clientIp = normalizeIp(req.body.clientIp || req.headers['x-forwarded-for'] || req.socket.remoteAddress);
-  return setupTunnel(req, res, agentId, clientIp);
+  return setupTunnel(req, res, agentId, clientIp, { source: 'agent' });
 });
 
-async function setupTunnel(req, res, agentId, clientIp) {
+async function setupTunnel(req, res, agentId, clientIp, options = {}) {
   console.log(`[tunnel] setupTunnel triggered for agentId: ${agentId}, clientIp: ${clientIp}`);
 
   if (!agentId) {
@@ -1127,8 +1177,29 @@ async function setupTunnel(req, res, agentId, clientIp) {
   }
 
   try {
+    const existingState = getTunnelRuntimeState(agentId);
+    if (!options.force && shouldReuseTunnelSetup(existingState, options.source)) {
+      const nextStatus = existingState.status === 'active' ? 'active' : 'provisioning';
+      await syncTunnelProfileStatus(agentId, nextStatus, clientIp);
+
+      return res.json({
+        success: true,
+        reused: true,
+        status: nextStatus,
+        tunnelName: existingState.tunnelName,
+        guardInterfacePresent: existingState.systemState.exists,
+        clientTunnelPresent: existingState.clientTunnelPresent,
+        guardTunnelIp: existingState.tunnelConfig?.guardTunnelIp || null,
+        clientTunnelIp: existingState.tunnelConfig?.clientTunnelIp || null,
+        subnet: existingState.tunnelConfig?.subnet || null,
+        statePath: existingState.tunnelConfig?.statePath || null,
+        clientCommandId: existingState.lastTunnelCommand?.id || null,
+        detail: 'Tunnel setup already active or in progress.',
+      });
+    }
+
     const guardPubIp = resolveGuardPublicIp(req);
-    
+
     // Allocate config and generate keys if missing or invalid
     let tunnelConfig = getTunnelConfig(agentId);
     const hasInvalidKeys = tunnelConfig && (String(tunnelConfig.guardPrivateKey).includes('FALLBACK') || !tunnelConfig.guardPrivateKey);
@@ -1218,6 +1289,7 @@ function runTunnelManager(action, tunnelConfig) {
     tunnelConfig?.guardPublicIp || '',
     tunnelConfig?.guardTunnelIp || '',
     tunnelConfig?.clientTunnelIp || '',
+    String(tunnelConfig?.listenPort || ''),
   ];
 
   const isRoot = typeof process.getuid === 'function' ? process.getuid() === 0 : false;
@@ -1254,6 +1326,46 @@ function readGuardTunnelState(agentId) {
   } catch (_) {
     return { exists: true, tunnelName, linkInfo: null };
   }
+}
+
+function getTunnelRuntimeState(agentId) {
+  const systemState = readGuardTunnelState(agentId);
+  const clientState = db.agents[agentId] || null;
+  const tunnelConfig = getTunnelConfig(agentId);
+  const clientTunnelPresent = Boolean(clientState?.tunnelPresent);
+  const clientTunnelName = clientState?.tunnelName || getTunnelInterfaceName(agentId);
+  const lastTunnelCommand = getLatestAgentCommand(agentId, 'tunnel:');
+  const commandPending = Boolean(lastTunnelCommand && ['queued', 'sent'].includes(lastTunnelCommand.status));
+  const updatedAt = tunnelConfig?.updatedAt || tunnelConfig?.createdAt || null;
+  const configAgeMs = updatedAt ? Date.now() - Date.parse(updatedAt) : Infinity;
+  const configRecentlyTouched = Number.isFinite(configAgeMs) && configAgeMs >= 0 && configAgeMs < 120000;
+
+  let status = 'inactive';
+  if (systemState.exists && clientTunnelPresent) {
+    status = 'active';
+  } else if (commandPending) {
+    status = 'provisioning';
+  } else if (systemState.exists || clientTunnelPresent || tunnelConfig) {
+    status = 'degraded';
+  }
+
+  return {
+    status,
+    tunnelName: systemState.tunnelName,
+    systemState,
+    clientState,
+    tunnelConfig,
+    clientTunnelPresent,
+    clientTunnelName,
+    lastTunnelCommand,
+    commandPending,
+    configRecentlyTouched,
+  };
+}
+
+function shouldReuseTunnelSetup(state, source) {
+  if (state.status === 'active' || state.commandPending) return true;
+  return source === 'agent' && state.configRecentlyTouched;
 }
 
 app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddleware, async (req, res) => {
@@ -1294,17 +1406,13 @@ app.delete('/api/agent/tunnel/remove', authMiddleware, privilegedSupabaseMiddlew
     try {
       const { data } = await supabaseAdmin.from('user_profiles').select('tunnel_status, client_ip').eq('agent_id', agent_id).single();
       const dbStatus = data?.tunnel_status || 'inactive';
-      const systemState = readGuardTunnelState(agent_id);
-      const clientState = db.agents[agent_id] || null;
-      const tunnelConfig = getTunnelConfig(agent_id);
-      const clientTunnelPresent = Boolean(clientState?.tunnelPresent);
-      const clientTunnelName = clientState?.tunnelName || getTunnelInterfaceName(agent_id);
-      const lastTunnelCommand = getLatestAgentCommand(agent_id, 'tunnel:');
-      let status = 'inactive';
+      const runtimeState = getTunnelRuntimeState(agent_id);
+      const { systemState, clientState, tunnelConfig, clientTunnelPresent, clientTunnelName, lastTunnelCommand } = runtimeState;
+      let status = runtimeState.status;
 
-      if (systemState.exists && clientTunnelPresent) {
-        status = 'active';
-      } else if (systemState.exists || clientTunnelPresent || dbStatus === 'active' || dbStatus === 'provisioning' || tunnelConfig) {
+      if (status === 'inactive' && dbStatus === 'provisioning') {
+        status = 'provisioning';
+      } else if (status === 'inactive' && dbStatus === 'active') {
         status = 'degraded';
       }
 

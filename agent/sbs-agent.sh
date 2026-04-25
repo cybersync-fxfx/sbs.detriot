@@ -61,6 +61,11 @@ const config = {
   enableTunnel: process.env.SBS_ENABLE_TUNNEL === '1'
 };
 
+const TUNNEL_RETRY_MS = 60000;
+let tunnelRegisterInFlight = false;
+let tunnelRegistered = false;
+let lastTunnelRegisterAt = 0;
+
 function log(msg) {
   const line = '[' + new Date().toISOString() + '] ' + msg;
   try { fs.appendFileSync('/var/log/sbs/agent.log', line + '\n'); } catch(e){}
@@ -90,15 +95,26 @@ function request(path, method, data, cb, hops=0) {
   req.end();
 }
 
-function registerTunnel() {
+function registerTunnel(reason = 'register') {
+  if (!config.enableTunnel || tunnelRegisterInFlight || tunnelRegistered) return;
+
+  const now = Date.now();
+  if (now - lastTunnelRegisterAt < TUNNEL_RETRY_MS) return;
+
+  tunnelRegisterInFlight = true;
+  lastTunnelRegisterAt = now;
+  log('[tunnel] registering with guard (' + reason + ')');
+
   request('/api/agent/tunnel/create', 'POST', {
     agentId: config.agentId,
     apiKey: config.apiKey
   }, (err) => {
+    tunnelRegisterInFlight = false;
     if (err) {
       log('[tunnel] ' + err.message);
       return;
     }
+    tunnelRegistered = true;
     log('[tunnel] registered with guard');
   });
 }
@@ -119,7 +135,7 @@ function register() {
       log('[register] connected');
       if (config.enableTunnel) {
         log('[tunnel] waiting for registration to settle...');
-        setTimeout(registerTunnel, 2000);
+        setTimeout(() => registerTunnel('initial register'), 2000);
       }
     }
   });
@@ -178,6 +194,14 @@ function sendStats() {
 
         const tunnelName = 'sbs_' + String(config.agentId || '').substring(0, 8);
         const tunnelPresent = fs.existsSync('/sys/class/net/' + tunnelName);
+        if (tunnelPresent) tunnelRegistered = true;
+
+        if (config.enableTunnel && !tunnelPresent && (Date.now() - (global.lastTunnelRetry || 0)) > TUNNEL_RETRY_MS) {
+          log('[tunnel] interface missing, attempting auto-recovery...');
+          global.lastTunnelRetry = Date.now();
+          tunnelRegistered = false;
+          registerTunnel('missing interface');
+        }
 
         request('/api/agent/stats','POST',{
           agentId:     config.agentId,
@@ -258,9 +282,12 @@ EOF
   # Install dependencies
   echo -e "${CYAN}[SBS] Installing dependencies and preparing system...${RESET}"
   apt-get update -qq
-  apt-get install -y curl nftables iproute2 net-tools jq wireguard wireguard-tools procps < /dev/null
+  apt-get install -y ca-certificates curl gnupg kmod nftables iproute2 net-tools jq wireguard wireguard-tools procps < /dev/null
 
   # Kernel tweaks
+  modprobe wireguard || true
+  modprobe nf_conntrack || true
+
   cat << 'SYSCTL_EOF' > /etc/sysctl.d/99-sbs.conf
 net.ipv4.ip_forward = 1
 net.ipv6.conf.all.forwarding = 1
@@ -270,8 +297,6 @@ net.netfilter.nf_conntrack_max = 2000000
 net.netfilter.nf_conntrack_tcp_timeout_established = 7440
 SYSCTL_EOF
   sysctl -p /etc/sysctl.d/99-sbs.conf || true
-  modprobe wireguard || true
-  modprobe nf_conntrack || true
 
   # Install node if missing
   if ! command -v node &>/dev/null; then

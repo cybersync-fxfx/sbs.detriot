@@ -117,7 +117,7 @@ export default function Settings({ token, user }) {
             </div>
             <div className="fact-row">
               <span>Installer Mode</span>
-              <span className="fact-value">Agent-first / tunnel deferred</span>
+              <span className="fact-value">Agent-first / WireGuard auto</span>
             </div>
           </div>
 

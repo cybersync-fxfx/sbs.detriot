@@ -69,7 +69,7 @@ export default function Install({ token, user }) {
               <span className="credential-label">Target OS</span>
               <select value={osType} onChange={e => setOsType(e.target.value)}>
                 <option value="ubuntu">Ubuntu (20.04, 22.04, 24.04)</option>
-                <option value="debian">Debian (11, 12)</option>
+                <option value="debian">Debian (11, 12, 13)</option>
               </select>
             </label>
 

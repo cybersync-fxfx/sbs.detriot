@@ -15,7 +15,7 @@ if [ ! -x "$MANAGER_PATH" ]; then
 fi
 
 # Extract and run restoration for each allocation
-node - "$STATE_PATH" <<'NODE' | while IFS=$'\t' read -r agentId clientPublicIp guardPublicIp guardTunnelIp clientTunnelIp guardPriv clientPub; do
+node - "$STATE_PATH" <<'NODE' | while IFS=$'\t' read -r agentId clientPublicIp guardPublicIp guardTunnelIp clientTunnelIp listenPort guardPriv clientPub; do
 const fs = require('fs');
 const statePath = process.argv[2];
 const raw = JSON.parse(fs.readFileSync(statePath, 'utf8'));
@@ -23,7 +23,7 @@ const allocations = raw.allocations || {};
 for (const [agentId, cfg] of Object.entries(allocations)) {
   if (!cfg || !cfg.clientPublicIp || !cfg.guardPublicIp || !cfg.guardTunnelIp || !cfg.clientTunnelIp) continue;
   process.stdout.write(
-    `${agentId}\t${cfg.clientPublicIp}\t${cfg.guardPublicIp}\t${cfg.guardTunnelIp}\t${cfg.clientTunnelIp}\t${cfg.guardPrivateKey || ''}\t${cfg.clientPublicKey || ''}\n`
+    `${agentId}\t${cfg.clientPublicIp}\t${cfg.guardPublicIp}\t${cfg.guardTunnelIp}\t${cfg.clientTunnelIp}\t${cfg.listenPort || 51820}\t${cfg.guardPrivateKey || ''}\t${cfg.clientPublicKey || ''}\n`
   );
 }
 NODE
@@ -40,5 +40,5 @@ NODE
     continue
   fi
 
-  bash "$MANAGER_PATH" add "$agentId" "$clientPublicIp" "$guardPublicIp" "$guardTunnelIp" "$clientTunnelIp"
+  bash "$MANAGER_PATH" add "$agentId" "$clientPublicIp" "$guardPublicIp" "$guardTunnelIp" "$clientTunnelIp" "$listenPort"
 done

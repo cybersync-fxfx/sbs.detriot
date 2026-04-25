@@ -19,8 +19,8 @@ Important reality for the current build:
   - agent registration
   - live stats
   - terminal
-- Full GRE production protection is not fully complete yet.
-- We still prepare the guard VPS for GRE now, but the installer currently runs in `agent-first / tunnel deferred` mode.
+- WireGuard tunnel orchestration is enabled by default.
+- Client IP hiding and public service exposure strategy still need production validation per customer/service.
 
 ## 1. What You Need
 
@@ -115,8 +115,10 @@ This must be done before expecting the panel to work properly.
 You need these values from Supabase:
 
 - `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_KEY`
+- `SUPABASE_ANON_KEY` or publishable key
+- `SUPABASE_SERVICE_KEY` / `SUPABASE_SERVICE_ROLE_KEY`
+
+Keep the Supabase service role/secret key only on the central SBS panel/guard server. Do not give it to customer/client servers. Agents and protected VPS machines should only receive their generated `SBS_AGENT_ID` and `SBS_API_KEY`.
 
 ## 8. Create the Server .env
 
@@ -131,7 +133,7 @@ Use:
 ```env
 PORT=3001
 SUPABASE_URL=your_supabase_url
-SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_ANON_KEY=your_supabase_publishable_or_anon_key
 SUPABASE_SERVICE_KEY=your_supabase_service_role_key
 ```
 
@@ -261,13 +263,13 @@ On the VPS provider side, allow:
 - `22/tcp`
 - `80/tcp`
 - `443/tcp`
-- `GRE protocol 47`
+- `51820-51900/udp` for WireGuard tunnels
 
 Notes:
 
 - Public users should hit `80/443`
 - `3001` should stay behind Nginx and does not need public exposure unless you intentionally want it public
-- GRE is not a TCP or UDP port
+- WireGuard listens on UDP. Keep the allocated tunnel port range open on the guard VPS.
 
 ## 14. Dashboard Reachability Check
 
@@ -374,7 +376,7 @@ If all steps above are done, your side is ready enough for:
 These are not fully finished yet just by setting up the VPS:
 
 - true client IP hiding
-- full GRE routing through guard
+- full WireGuard routing through guard
 - production tunnel orchestration
 - per-customer public service exposure strategy
 

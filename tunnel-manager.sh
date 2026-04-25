@@ -23,10 +23,15 @@ ensure_nft_table() {
   # Ensure the detroit_guard table and required chains exist
   nft list table inet detroit_guard >/dev/null 2>&1 || nft add table inet detroit_guard
   nft list chain inet detroit_guard forward >/dev/null 2>&1 || nft add chain inet detroit_guard forward '{ type filter hook forward priority 0; policy accept; }'
-  
+
   # Ensure NAT table exists (using ip family for nat is common)
   nft list table ip detroit_nat >/dev/null 2>&1 || nft add table ip detroit_nat
   nft list chain ip detroit_nat postrouting >/dev/null 2>&1 || nft add chain ip detroit_nat postrouting '{ type nat hook postrouting priority 100; policy accept; }'
+  nft list set ip detroit_nat postrouting_masq >/dev/null 2>&1 || nft add set ip detroit_nat postrouting_masq '{ type ipv4_addr; }'
+
+  if ! nft -a list chain ip detroit_nat postrouting 2>/dev/null | grep -q 'ip saddr @postrouting_masq masquerade'; then
+    nft add rule ip detroit_nat postrouting ip saddr @postrouting_masq masquerade
+  fi
 }
 
 # Ensure wireguard is installed
@@ -84,12 +89,9 @@ EOF
 
     # 4. NAT/Forwarding rules (using nftables)
     ensure_nft_table
-    
-    # Add MASQUERADE for the client's tunnel IP
-    nft add element ip detroit_nat postrouting_masq { "${CLIENT_INTERNAL_IP}" } 2>/dev/null || {
-      # Fallback if set isn't used
-      nft add rule ip detroit_nat postrouting ip saddr "${CLIENT_INTERNAL_IP}" masquerade
-    }
+
+    # Track client tunnel IPs in one stable NAT set.
+    nft add element ip detroit_nat postrouting_masq "{ ${CLIENT_INTERNAL_IP} }" 2>/dev/null || true
 
     log "Tunnel ${TUNNEL_NAME} is UP (${GUARD_INTERNAL_IP} <-> ${CLIENT_INTERNAL_IP})"
     echo "{ \"status\": \"ok\", \"tunnel\": \"${TUNNEL_NAME}\", \"client_ip\": \"${CLIENT_IP}\" }"
@@ -99,10 +101,12 @@ EOF
     log "Removing tunnel ${TUNNEL_NAME}..."
     wg-quick down "$TUNNEL_NAME" 2>/dev/null || true
     rm -f "$CONFIG_FILE"
-    
-    # Cleanup NAT rule if possible (hard with simple nft add rule, but we can flush if needed or just let it be)
-    # nft flush table ip detroit_nat 2>/dev/null || true
-    
+
+    if [ -n "$CLIENT_INTERNAL_IP" ]; then
+      ensure_nft_table
+      nft delete element ip detroit_nat postrouting_masq "{ ${CLIENT_INTERNAL_IP} }" 2>/dev/null || true
+    fi
+
     echo "{ \"status\": \"ok\", \"tunnel\": \"removed\" }"
     ;;
 

@@ -26,8 +26,9 @@ SBS is a full-stack web application designed for DDoS protection management. Use
    GUARD_PUBLIC_IP="43.228.212.54"
    SBS_TUNNEL_POOL="10.200.0.0/16"
    ```
-   `SUPABASE_SERVICE_KEY` is required for admin approval, admin user listing, and tunnel/profile updates. The server also accepts `SUPABASE_SERVICE_ROLE_KEY` as an alias.
-   `GUARD_PUBLIC_IP` should be the real public GRE endpoint for the guard server. `SBS_TUNNEL_POOL` controls the per-agent `/30` pool used for GRE tunnel addressing.
+   `SUPABASE_SERVICE_KEY` is required for admin approval, admin user listing, agent authentication, and tunnel/profile updates. The server also accepts `SUPABASE_SERVICE_ROLE_KEY` as an alias.
+   Keep `SUPABASE_SERVICE_KEY` / `SUPABASE_SERVICE_ROLE_KEY` only on the central SBS panel/guard server. Do not put it in frontend builds, customer VPS env files, agent installers, logs, or support messages. Client servers should only receive the generated agent credentials (`SBS_AGENT_ID` and `SBS_API_KEY`). If a customer needs to operate their own panel, give them a separate Supabase project or separate database credentials, not your shared production service key.
+   `GUARD_PUBLIC_IP` should be the real public WireGuard endpoint for the guard server. `SBS_TUNNEL_POOL` controls the per-agent `/30` pool used for tunnel addressing.
    `SBS_RADAR_*` controls the active guard-side scan engine and auto-ban thresholds. If your panel stays behind Cloudflare or another reverse proxy, add those proxy CIDRs to `SBS_RADAR_TRUSTED_PROXY_CIDRS` so the scanner never auto-bans them.
 
 3. **Database Setup:**
@@ -85,6 +86,8 @@ SBS_RADAR_WHITELIST_CIDRS="127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,1
 SBS_RADAR_TRUSTED_PROXY_CIDRS=""
 ```
 
+`SUPABASE_ANON_KEY` may be a publishable key (`sb_publishable_...`) or the legacy anon key. It is low privilege and still depends on RLS. The service role/secret key is high privilege, bypasses RLS, and must stay on the server you control.
+
 ### 4. Nginx Reverse Proxy Config (with WebSocket Support)
 Create an Nginx configuration file (`/etc/nginx/sites-available/sbs`):
 
@@ -120,7 +123,7 @@ sudo certbot --nginx -d yourdomain.com
 ```
 
 ### 6. Guard Tunnel Runtime
-Run the guard bootstrap after deployment so GRE state, nftables auto-ban, and tunnel restore services are installed:
+Run the guard bootstrap after deployment so WireGuard state, nftables auto-ban, and tunnel restore services are installed:
 
 ```bash
 cd /opt/sbs
@@ -131,7 +134,7 @@ sudo bash ./setup-guard.sh
 This installs:
 - `/opt/detroit-sbs/tunnel-manager.sh`
 - `/opt/detroit-sbs/restore-tunnels.sh`
-- `sbs-tunnel-restore.service` to recreate saved GRE tunnels after reboot
+- `sbs-tunnel-restore.service` to recreate saved WireGuard tunnels after reboot
 
 ### 6.1 Threat Radar / Strict Auto-Ban
 Threat Radar now performs active guard-side scans and can automatically ban suspicious IPs before connection floods overwhelm protected services. The safest production defaults are already built in, but you should still tune the whitelist and trusted proxy ranges:
