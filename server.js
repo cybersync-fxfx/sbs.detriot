@@ -79,18 +79,11 @@ let commandLedger = {}; // { cmdId: { agentId, kind, status, output, ... } }
 let radar = null;
 
 const ipv4Pattern = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
-const escapeTemplateLiteral = (value) => String(value)
-  .replace(/\\/g, '\\\\')
-  .replace(/`/g, '\\`')
-  .replace(/\$\{/g, '\\${');
+const CLIENT_TUNNEL_SCRIPT_SOURCE = fs
+  .readFileSync(path.join(__dirname, 'agent', 'setup-tunnel-client.sh'), 'utf8')
+  .replace(/\r\n/g, '\n');
 
-const CLIENT_TUNNEL_SCRIPT_SOURCE = escapeTemplateLiteral(
-  fs
-    .readFileSync(path.join(__dirname, 'agent', 'setup-tunnel-client.sh'), 'utf8')
-    .replace(/\r\n/g, '\n')
-);
-
-const CLIENT_TUNNEL_SERVICE_UNIT = escapeTemplateLiteral(`[Unit]
+const CLIENT_TUNNEL_SERVICE_UNIT = `[Unit]
 Description=SBS Client WireGuard Tunnel
 After=network-online.target
 Wants=network-online.target
@@ -106,7 +99,7 @@ StandardError=append:/var/log/sbs/agent.log
 
 [Install]
 WantedBy=multi-user.target
-`.replace(/\r\n/g, '\n'));
+`.replace(/\r\n/g, '\n');
 
 const normalizeIp = (value) => {
   if (!value) return '';
