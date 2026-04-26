@@ -1118,7 +1118,12 @@ sed -i 's/\r$//' /opt/sbs-agent/agent.js /opt/sbs-agent/.env /opt/sbs-agent/setu
 systemctl daemon-reload
 systemctl enable sbs-agent
 systemctl restart sbs-agent
-systemctl disable sbs-tunnel 2>/dev/null || true
+if [ -f /opt/sbs-agent/tunnel.env ]; then
+  systemctl enable sbs-tunnel 2>/dev/null || true
+  systemctl restart sbs-tunnel 2>/dev/null || true
+else
+  systemctl disable sbs-tunnel 2>/dev/null || true
+fi
 
 echo "=============================================="
 echo "  SBS Agent installation complete! ✓"
