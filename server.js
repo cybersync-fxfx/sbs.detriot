@@ -99,8 +99,8 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 EnvironmentFile=/opt/sbs-agent/tunnel.env
-ExecStart=/opt/sbs-agent/setup-tunnel-client.sh --apply
-ExecStop=/opt/sbs-agent/setup-tunnel-client.sh --remove
+ExecStart=/opt/sbs-agent/setup-tunnel-client.sh apply
+ExecStop=/opt/sbs-agent/setup-tunnel-client.sh remove
 StandardOutput=append:/var/log/sbs/agent.log
 StandardError=append:/var/log/sbs/agent.log
 
@@ -282,7 +282,7 @@ if systemctl list-unit-files sbs-tunnel.service >/dev/null 2>&1; then
   systemctl disable --now sbs-tunnel.service || systemctl stop sbs-tunnel.service || true
 fi
 if [ -f /opt/sbs-agent/setup-tunnel-client.sh ]; then
-  /opt/sbs-agent/setup-tunnel-client.sh --remove || true
+  /opt/sbs-agent/setup-tunnel-client.sh remove || true
 fi
 rm -f /opt/sbs-agent/tunnel.env
 rm -f /etc/systemd/system/sbs-tunnel.service

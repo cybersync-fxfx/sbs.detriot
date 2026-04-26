@@ -9,7 +9,12 @@ trim_cr() {
   printf '%s' "${1%$'\r'}"
 }
 
-ACTION="$(trim_cr "${1:---apply}")"
+ACTION="$(trim_cr "${1:-apply}")"
+ACTION="${ACTION//$'\r'/}"
+ACTION="${ACTION//$'\n'/}"
+ACTION="${ACTION//$'\t'/}"
+ACTION="${ACTION// /}"
+ACTION="${ACTION#--}"
 
 log() {
   local message="$1"
@@ -95,14 +100,14 @@ remove_tunnel() {
 }
 
 case "$ACTION" in
-  --apply|apply)
+  apply)
     apply_tunnel
     ;;
-  --remove|remove)
+  remove)
     remove_tunnel
     ;;
   *)
-    echo "Usage: $0 [--apply|--remove]" >&2
+    echo "Usage: $0 [apply|remove]" >&2
     exit 1
     ;;
 esac
