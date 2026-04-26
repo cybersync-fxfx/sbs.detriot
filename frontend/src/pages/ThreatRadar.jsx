@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import TrafficLedger from '../components/TrafficLedger';
+import { useTelemetry } from '../context/TelemetryContext';
 
 const DEFAULT_CONFIG = {
   enabled: true,
@@ -19,6 +21,7 @@ const DEFAULT_CONFIG = {
 };
 
 export default function ThreatRadar({ token }) {
+  const { trafficEvents, stats } = useTelemetry();
   const [data, setData] = useState({ recent: [], stats: { scannedToday: 0, blockedToday: 0 }, radar: null });
   const [config, setConfig] = useState(DEFAULT_CONFIG);
   const [loading, setLoading] = useState(true);
@@ -190,6 +193,23 @@ export default function ThreatRadar({ token }) {
           <div className="metric-label">Last Cycle</div>
           <div className="metric-value">{summary ? `${summary.scannedIps} IPs` : 'Idle'}</div>
         </article>
+      </section>
+
+      <section className="glass-panel elevated-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Live Packets</p>
+            <h3>Running IP Traffic Ledger</h3>
+          </div>
+          <div className="traffic-summary-chips">
+            <span className="meta-chip text-green">Good</span>
+            <span className="meta-chip text-amber">Medium</span>
+            <span className="meta-chip text-red">Suspicious</span>
+            <span className="meta-chip">{(stats.pps || 0).toFixed(1)} pps</span>
+            <span className="meta-chip">{trafficEvents.length} rows</span>
+          </div>
+        </div>
+        <TrafficLedger events={trafficEvents} limit={32} />
       </section>
 
       <div className="content-grid two-up">

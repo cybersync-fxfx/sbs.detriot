@@ -6,6 +6,7 @@ import {
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import { useTelemetry } from '../context/TelemetryContext';
+import TrafficLedger from '../components/TrafficLedger';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler);
 
@@ -14,7 +15,7 @@ const CHART_POINTS = 60;
 export default function Dashboard({ token }) {
   const {
     stats, cpuHistory, netHistory, connHistory, logs,
-    isConnected, wsState, lastUpdateMs, agentStatus,
+    trafficEvents, isConnected, wsState, lastUpdateMs,
   } = useTelemetry();
 
   const [graphTab, setGraphTab] = useState('bandwidth'); // 'bandwidth' | 'tcp' | 'udp'
@@ -145,6 +146,8 @@ export default function Dashboard({ token }) {
     { label: 'Blocked IPs',       value: stats.bannedIPs,                  tone: 'red'  },
     { label: 'CPU Usage',         value: `${stats.cpuPercent.toFixed(1)}%`, tone: 'blue' },
     { label: 'Memory',            value: `${(stats.memPercent || 0).toFixed(1)}%`, tone: 'red' },
+    { label: 'Packets / Sec',     value: (stats.pps || 0).toFixed(1),      tone: 'blue' },
+    { label: 'Avg Packet',        value: `${stats.avgPacketBytes || 0} B`, tone: 'blue' },
   ];
 
   const handleCreateTunnel = async () => {
@@ -345,6 +348,13 @@ export default function Dashboard({ token }) {
           <div className="chart-frame">
             <Line data={cpuChartData} options={chartOptions('%', 100)} />
           </div>
+          <div className="traffic-panel-fill dashboard-flow-fill">
+            <div className="inline-section-heading">
+              <span>Realtime Traffic</span>
+              <span>{(stats.pps || 0).toFixed(1)} pps</span>
+            </div>
+            <TrafficLedger events={trafficEvents} limit={6} compact />
+          </div>
         </article>
 
         <article className="glass-panel elevated-panel">
@@ -417,6 +427,13 @@ export default function Dashboard({ token }) {
             <Line data={udpChartData} options={chartOptions(' conns', undefined)} />
           )}
         </div>
+        <div className="traffic-panel-fill">
+          <div className="inline-section-heading">
+            <span>Live IP Flow</span>
+            <span>{trafficEvents.length} samples</span>
+          </div>
+          <TrafficLedger events={trafficEvents} limit={8} compact />
+        </div>
       </section>
 
       <section className="content-grid two-up">
@@ -425,6 +442,7 @@ export default function Dashboard({ token }) {
           <div className="fact-list compact">
             <div className="fact-row"><span>SYN Rate</span><span className={`fact-value ${stats.synRate > 500 ? 'danger' : ''}`}>{stats.synRate}/s</span></div>
             <div className="fact-row"><span>Packets / Sec</span><span className="fact-value">{stats.pps}</span></div>
+            <div className="fact-row"><span>Avg Packet Size</span><span className="fact-value">{stats.avgPacketBytes || 0} B</span></div>
             <div className="fact-row"><span>Blocked IPs</span><span className={`fact-value ${stats.bannedIPs > 0 ? 'danger' : ''}`}>{stats.bannedIPs}</span></div>
             <div className="fact-row"><span>Established TCP</span><span className="fact-value">{stats.connections}</span></div>
           </div>

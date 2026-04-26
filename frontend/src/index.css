@@ -626,6 +626,137 @@ button.danger:hover:not(:disabled) {
   height: 220px;
 }
 
+.traffic-panel-fill {
+  margin-top: 12px;
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  background: rgba(0, 0, 0, 0.28);
+  min-height: 210px;
+}
+
+.dashboard-flow-fill {
+  min-height: 180px;
+}
+
+.inline-section-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(59, 130, 246, 0.18);
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+}
+
+.traffic-summary-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.traffic-ledger {
+  overflow-x: auto;
+  max-height: 520px;
+}
+
+.traffic-ledger.compact {
+  max-height: 210px;
+}
+
+.traffic-table {
+  min-width: 940px;
+}
+
+.traffic-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(6, 8, 12, 0.96);
+}
+
+.traffic-table th,
+.traffic-table td {
+  padding: 7px 9px;
+  white-space: nowrap;
+}
+
+.traffic-table td {
+  font-size: 0.72rem;
+}
+
+.traffic-row {
+  border-left: 3px solid transparent;
+}
+
+.traffic-row.severity-success {
+  border-left-color: var(--success-green);
+}
+
+.traffic-row.severity-warning {
+  border-left-color: var(--warn-amber);
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.traffic-row.severity-danger {
+  border-left-color: var(--danger-red);
+  background: rgba(239, 68, 68, 0.07);
+}
+
+.traffic-time,
+.traffic-endpoint {
+  font-family: var(--font-mono);
+}
+
+.traffic-endpoint {
+  color: var(--accent-blue);
+}
+
+.traffic-dir,
+.traffic-verdict {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.traffic-dir.incoming {
+  color: var(--accent-blue);
+  border-color: rgba(96, 165, 250, 0.35);
+  background: rgba(96, 165, 250, 0.08);
+}
+
+.traffic-dir.outgoing {
+  color: var(--accent-cyan);
+  border-color: rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.traffic-verdict.success {
+  color: var(--success-green);
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.traffic-verdict.warning {
+  color: var(--warn-amber);
+  border-color: rgba(245, 158, 11, 0.38);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.traffic-verdict.danger {
+  color: var(--danger-red);
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.1);
+}
+
 /* Fact Lists */
 .fact-list {
   display: flex;
